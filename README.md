@@ -34,13 +34,12 @@ Project_CIM/
 ├── analysis/        # R markdown files for analysis
 │   ├── 01_exploratory_data_analysis.Rmd  # EDA with visualizations
 │   ├── 02_modeling.Rmd                   # Model development and evaluation
-│   ├── 03_simulation.Rmd                 # Scenario simulations
-│   └── simulation_report.html            # Lightweight simulation results report
+│   └── 03_simulation.Rmd                 # Scenario simulations
 ├── models/          # Trained models
 ├── results/         # Model evaluation metrics and simulation results
 │   └── simulations/ # Detailed simulation results and visualizations
 ├── figs/            # Generated figures and visualizations
-└── README.md        # Project overview and instructions
+└── README.md        # Project overview and instructions (this file)
 ```
 
 ## Methodology
@@ -103,9 +102,8 @@ Project_CIM/
    - `analysis/02_modeling.Rmd`
    - `analysis/03_simulation.Rmd`
 
-5. Alternatively, view the pre-generated HTML reports:
-   - `analysis/03_simulation.html` (Full analysis with code)
-   - `analysis/simulation_report.html` (Simplified results summary)
+5. View the rendered analysis with visualizations:
+   - `analysis/03_simulation.html` (Full analysis with code and visualizations)
 
 ## Recommendations for Hosts
 1. **Location Strategy**: Focus on properties in central districts like Mitte, Friedrichshain-Kreuzberg, and Prenzlauer Berg for maximum booking potential.
