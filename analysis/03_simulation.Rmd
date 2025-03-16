@@ -1,0 +1,562 @@
+---
+title: "Berlin Airbnb Rental Demand Prediction - Simulation Analysis"
+author: "Data Science Team"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: cosmo
+    highlight: tango
+    code_folding: show
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, 
+                     warning = FALSE, 
+                     message = FALSE,
+                     fig.width = 10, 
+                     fig.height = 6)
+
+# Load necessary libraries
+library(tidyverse)      # For data manipulation and visualization
+library(ggplot2)        # For visualization
+library(knitr)          # For nice tables
+library(randomForest)   # For the predictive model
+library(lubridate)      # For date manipulation
+library(forecast)       # For time series forecasting
+library(MASS)           # For mvrnorm function
+library(gridExtra)      # For grid.arrange
+```
+
+# Introduction
+
+This document performs simulation analysis to understand how different factors might influence Airbnb rental demand in Berlin. We'll use our trained model to simulate demand under various scenarios and assess the potential impact of changes in the market, economic conditions, or tourist patterns.
+
+## Loading Data and Model
+
+First, we need to load our preprocessed data and the best model from the modeling phase:
+
+```{r load_data_model}
+# Set file paths
+processed_data_path <- "../data/processed/"
+
+# Check if processed data exists
+if (!file.exists(paste0(processed_data_path, "airbnb_berlin_clean.csv"))) {
+  message("Processed data file not found! Please run the data preprocessing script first.")
+}
+
+# For now, create a sample dataset and model as placeholders
+set.seed(123)
+n <- 1000  # sample size
+airbnb_data <- data.frame(
+  listing_id = 1:n,
+  price = runif(n, 40, 300),
+  accommodates = sample(1:8, n, replace = TRUE),
+  bedrooms = sample(1:4, n, replace = TRUE),
+  bathrooms = sample(c(1, 1.5, 2, 2.5, 3), n, replace = TRUE),
+  neighborhood = sample(c("Mitte", "Kreuzberg", "Neukölln", "Prenzlauer Berg", "Friedrichshain"), n, replace = TRUE),
+  room_type = sample(c("Entire home/apt", "Private room", "Shared room"), n, replace = TRUE),
+  reviews = rpois(n, 20),
+  overall_rating = rnorm(n, 4.5, 0.5),
+  distance_to_center = runif(n, 0, 8),
+  demand_proxy = runif(n, 0, 1)
+)
+
+# Mock model training (simplified)
+X <- model.matrix(~ price + accommodates + bedrooms + bathrooms + 
+                    neighborhood + room_type + overall_rating + 
+                    distance_to_center - 1, data = airbnb_data)
+y <- airbnb_data$demand_proxy
+
+set.seed(123)
+best_model <- randomForest(X, y, ntree = 50)
+```
+
+# Scenario 1: Impact of Price Changes
+
+In this scenario, we'll simulate how changes in listing prices might affect demand:
+
+```{r price_simulation}
+# Define a range of price changes (percentage)
+price_changes <- seq(-0.3, 0.3, by = 0.05)  # -30% to +30%
+
+# Function to simulate demand under price changes
+simulate_price_change <- function(data, model, percent_change) {
+  # Create a copy of the data
+  modified_data <- data
+  
+  # Adjust prices
+  modified_data$price <- data$price * (1 + percent_change)
+  
+  # Create feature matrix
+  X_mod <- model.matrix(~ price + accommodates + bedrooms + bathrooms + 
+                         neighborhood + room_type + overall_rating + 
+                         distance_to_center - 1, data = modified_data)
+  
+  # Predict demand
+  predicted_demand <- predict(model, X_mod)
+  
+  # Calculate average demand
+  mean_demand <- mean(predicted_demand)
+  
+  return(data.frame(
+    price_change_percent = percent_change * 100,
+    mean_demand = mean_demand,
+    relative_demand = mean_demand / mean(predict(model, X))
+  ))
+}
+
+# Run simulations for each price change
+price_simulation_results <- map_df(price_changes, 
+                                 ~simulate_price_change(airbnb_data, best_model, .))
+
+# Visualize results
+ggplot(price_simulation_results, aes(x = price_change_percent, y = relative_demand)) +
+  geom_line(color = "blue", size = 1.2) +
+  geom_point(color = "red", size = 3) +
+  geom_hline(yintercept = 1, linetype = "dashed", color = "darkgray") +
+  labs(title = "Simulated Impact of Price Changes on Rental Demand",
+       x = "Price Change (%)",
+       y = "Relative Demand (1.0 = current)") +
+  theme_minimal()
+
+# Calculate price elasticity of demand
+price_simulation_results <- price_simulation_results %>%
+  mutate(
+    price_change_decimal = price_change_percent / 100,
+    demand_change_percent = (relative_demand - 1) * 100,
+    elasticity = ifelse(price_change_decimal != 0, 
+                        demand_change_percent / price_change_percent, NA)
+  )
+
+# Average elasticity
+avg_elasticity <- mean(price_simulation_results$elasticity, na.rm = TRUE)
+cat("Average price elasticity of demand:", round(avg_elasticity, 2), "\n")
+
+# Elasticity by price change
+ggplot(price_simulation_results %>% filter(price_change_decimal != 0), 
+       aes(x = price_change_percent, y = elasticity)) +
+  geom_point(color = "blue", size = 3) +
+  geom_smooth(method = "loess", se = FALSE, color = "red") +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "darkgray") +
+  labs(title = "Price Elasticity of Demand at Different Price Change Levels",
+       x = "Price Change (%)",
+       y = "Elasticity") +
+  theme_minimal()
+```
+
+# Scenario 2: Neighborhood Popularity Changes
+
+Here we'll simulate the impact of certain neighborhoods becoming more or less popular (e.g., due to events, gentrification, or tourism shifts):
+
+```{r neighborhood_simulation}
+# Function to simulate demand with neighborhood popularity shifts
+simulate_neighborhood_popularity <- function(data, model, neighborhood, popularity_factor) {
+  # Create a copy of the data
+  modified_data <- data
+  
+  # Identify baseline demand by neighborhood
+  X_base <- model.matrix(~ price + accommodates + bedrooms + bathrooms + 
+                         neighborhood + room_type + overall_rating + 
+                         distance_to_center - 1, data = data)
+  base_predictions <- predict(model, X_base)
+  baseline_demand <- data.frame(
+    neighborhood = data$neighborhood,
+    demand = base_predictions
+  ) %>%
+    group_by(neighborhood) %>%
+    summarize(mean_demand = mean(demand))
+  
+  # Create new dataset with modified properties for the target neighborhood
+  # For demonstration purposes, we'll simulate this by:
+  # - Adjusting ratings for listings in the target neighborhood
+  # - The direction and magnitude depend on the popularity_factor
+  
+  # Adjust ratings for the target neighborhood
+  rating_change <- (popularity_factor - 1) * 0.5  # Scale the change
+  modified_data$overall_rating <- ifelse(
+    modified_data$neighborhood == neighborhood,
+    pmin(pmax(modified_data$overall_rating + rating_change, 1), 5),  # Keep within 1-5 range
+    modified_data$overall_rating
+  )
+  
+  # Create feature matrix for modified data
+  X_mod <- model.matrix(~ price + accommodates + bedrooms + bathrooms + 
+                         neighborhood + room_type + overall_rating + 
+                         distance_to_center - 1, data = modified_data)
+  
+  # Predict demand
+  modified_predictions <- predict(model, X_mod)
+  
+  # Calculate new demand by neighborhood
+  modified_demand <- data.frame(
+    neighborhood = modified_data$neighborhood,
+    demand = modified_predictions
+  ) %>%
+    group_by(neighborhood) %>%
+    summarize(mean_demand = mean(demand))
+  
+  # Calculate demand changes
+  demand_changes <- left_join(modified_demand, baseline_demand, 
+                               by = "neighborhood", suffix = c("_modified", "_baseline"))
+  
+  demand_changes <- demand_changes %>%
+    mutate(
+      relative_demand = mean_demand_modified / mean_demand_baseline,
+      percent_change = (mean_demand_modified / mean_demand_baseline - 1) * 100
+    )
+  
+  # Return results
+  return(list(
+    neighborhood = neighborhood,
+    popularity_factor = popularity_factor,
+    demand_changes = demand_changes
+  ))
+}
+
+# Define neighborhoods and popularity factors to simulate
+neighborhoods <- c("Mitte", "Kreuzberg", "Neukölln")
+popularity_factors <- c(0.8, 0.9, 1.0, 1.1, 1.2)  # 0.8 = 20% less popular, 1.2 = 20% more popular
+
+# Create all combinations
+simulation_params <- expand.grid(
+  neighborhood = neighborhoods,
+  popularity_factor = popularity_factors
+)
+
+# Run simulations
+neighborhood_simulations <- map2(
+  simulation_params$neighborhood,
+  simulation_params$popularity_factor,
+  ~simulate_neighborhood_popularity(airbnb_data, best_model, .x, .y)
+)
+
+# Extract results for visualization
+neighborhood_results <- map_df(neighborhood_simulations, function(sim) {
+  sim$demand_changes %>%
+    mutate(
+      target_neighborhood = sim$neighborhood,
+      popularity_factor = sim$popularity_factor
+    )
+})
+
+# Visualize impact on the target neighborhoods
+target_results <- neighborhood_results %>%
+  filter(neighborhood == target_neighborhood)
+
+ggplot(target_results, aes(x = popularity_factor, y = percent_change, color = neighborhood)) +
+  geom_line(size = 1.2) +
+  geom_point(size = 3) +
+  labs(title = "Impact of Popularity Changes on Target Neighborhood Demand",
+       x = "Popularity Factor (1.0 = current)",
+       y = "Demand Change (%)") +
+  theme_minimal()
+
+# Visualize spillover effects to other neighborhoods
+spillover_results <- neighborhood_results %>%
+  filter(neighborhood != target_neighborhood)
+
+ggplot(spillover_results, aes(x = popularity_factor, y = percent_change, 
+                             color = neighborhood, linetype = target_neighborhood)) +
+  geom_line(size = 1) +
+  geom_point(size = 2) +
+  labs(title = "Spillover Effects of Neighborhood Popularity Changes",
+       x = "Target Neighborhood Popularity Factor",
+       y = "Demand Change in Other Neighborhoods (%)") +
+  theme_minimal() +
+  facet_wrap(~target_neighborhood)
+```
+
+# Scenario 3: Seasonal Demand Fluctuations
+
+Let's simulate seasonal demand patterns and potential impacts of major events:
+
+```{r seasonal_simulation}
+# Create simulated seasonal demand baseline
+set.seed(456)
+months <- 1:12
+month_names <- month.abb
+
+# Simulate seasonal factors (higher in summer, lower in winter)
+seasonal_factors <- c(0.7, 0.75, 0.85, 0.95, 1.05, 1.15, 
+                      1.25, 1.2, 1.1, 0.9, 0.8, 0.9)
+
+# Add some randomness
+seasonal_factors <- seasonal_factors + rnorm(12, 0, 0.05)
+
+# Create a dataframe for seasonal baseline
+seasonal_baseline <- data.frame(
+  month = month_names,
+  month_num = months,
+  seasonal_factor = seasonal_factors
+)
+
+# Visualize seasonal baseline
+ggplot(seasonal_baseline, aes(x = factor(month, levels = month.abb), y = seasonal_factor)) +
+  geom_bar(stat = "identity", fill = "steelblue", alpha = 0.7) +
+  geom_line(aes(x = month_num, y = seasonal_factor, group = 1), 
+            color = "red", size = 1) +
+  geom_point(aes(x = month_num, y = seasonal_factor), 
+             color = "red", size = 3) +
+  labs(title = "Simulated Seasonal Demand Factors",
+       x = "Month",
+       y = "Demand Factor (1.0 = average)") +
+  theme_minimal()
+
+# Simulate event impacts
+# Let's assume there are major events in March (ITB Travel Trade Show),
+# June (Tech Open Air), and September (Berlin Marathon)
+events <- data.frame(
+  month = c("Mar", "Jun", "Sep"),
+  event = c("ITB Travel Show", "Tech Open Air", "Berlin Marathon"),
+  impact = c(0.15, 0.10, 0.20)  # Additional demand increase
+)
+
+# Add events to seasonal baseline
+seasonal_with_events <- seasonal_baseline %>%
+  left_join(events, by = "month") %>%
+  mutate(
+    event_impact = ifelse(is.na(impact), 0, impact),
+    total_factor = seasonal_factor + event_impact
+  )
+
+# Visualize with events
+events_plot <- ggplot(seasonal_with_events, aes(x = factor(month, levels = month.abb))) +
+  geom_bar(aes(y = seasonal_factor), stat = "identity", fill = "steelblue", alpha = 0.7) +
+  geom_bar(aes(y = event_impact), stat = "identity", fill = "coral", alpha = 0.7) +
+  geom_line(aes(x = month_num, y = total_factor, group = 1), 
+            color = "red", size = 1) +
+  geom_point(aes(x = month_num, y = total_factor), 
+             color = "red", size = 3) +
+  geom_text(data = filter(seasonal_with_events, !is.na(event)),
+            aes(y = total_factor + 0.05, label = event),
+            angle = 90, hjust = 0, size = 3) +
+  labs(title = "Seasonal Demand with Major Events",
+       x = "Month",
+       y = "Demand Factor") +
+  theme_minimal()
+
+# Simulate demand across neighborhoods and months
+neighborhoods <- unique(airbnb_data$neighborhood)
+
+# Create seasonal baseline for each neighborhood (some neighborhoods might have different patterns)
+neighborhood_seasonality <- expand.grid(
+  neighborhood = neighborhoods,
+  month = month_names,
+  month_num = months
+) %>%
+  left_join(seasonal_with_events, by = c("month", "month_num"))
+
+# Add neighborhood-specific factors
+# For example, central areas might see higher event impacts
+neighborhood_seasonality <- neighborhood_seasonality %>%
+  mutate(
+    neighborhood_factor = case_when(
+      neighborhood == "Mitte" ~ 1.2,  # More affected by tourism
+      neighborhood == "Kreuzberg" ~ 1.1,  # Popular with visitors
+      neighborhood == "Prenzlauer Berg" ~ 1.05,
+      neighborhood == "Friedrichshain" ~ 1.05,
+      neighborhood == "Neukölln" ~ 0.9,  # Less affected
+      TRUE ~ 1.0
+    ),
+    adjusted_factor = total_factor * neighborhood_factor
+  )
+
+# Visualize seasonal patterns by neighborhood
+ggplot(neighborhood_seasonality, 
+       aes(x = factor(month, levels = month.abb), y = adjusted_factor, 
+           color = neighborhood, group = neighborhood)) +
+  geom_line(size = 1) +
+  geom_point(size = 2) +
+  labs(title = "Simulated Seasonal Demand by Neighborhood",
+       x = "Month",
+       y = "Relative Demand Factor") +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+```
+
+# Scenario 4: Monte Carlo Simulation for Revenue Optimization
+
+Let's use Monte Carlo simulation to help hosts optimize pricing for maximum revenue:
+
+```{r monte_carlo}
+# Function to simulate revenue based on price and occupancy
+simulate_revenue <- function(base_price, price_elasticity, 
+                            price_variability, demand_variability,
+                            n_simulations = 1000) {
+  
+  # Generate price adjustments around the base price
+  price_adjustments <- seq(0.7, 1.3, by = 0.05)  # From -30% to +30%
+  
+  # For each price adjustment, run n_simulations
+  results <- map_df(price_adjustments, function(adj) {
+    
+    # Adjusted price
+    adjusted_price <- base_price * adj
+    
+    # Mean expected demand based on price elasticity
+    mean_demand <- 1 + price_elasticity * (adj - 1)
+    
+    # Run simulations with variability
+    sim_results <- map_df(1:n_simulations, function(i) {
+      # Add random variability to demand
+      actual_demand <- max(0, mean_demand + rnorm(1, 0, demand_variability))
+      
+      # Add random variability to actual price (e.g., discounts, special offers)
+      actual_price <- max(10, adjusted_price * (1 + rnorm(1, 0, price_variability)))
+      
+      # Calculate occupancy (0-1)
+      occupancy <- pmin(1, actual_demand)
+      
+      # Calculate revenue
+      revenue <- occupancy * actual_price
+      
+      # Return simulation result
+      data.frame(
+        simulation = i,
+        price_adj = adj,
+        actual_price = actual_price,
+        actual_demand = actual_demand,
+        occupancy = occupancy,
+        revenue = revenue
+      )
+    })
+    
+    return(sim_results)
+  })
+  
+  return(results)
+}
+
+# Run simulation for a sample property
+set.seed(789)
+base_price <- 100  # Base price in Euro
+price_elasticity <- -0.8  # From earlier analysis
+price_variability <- 0.05  # 5% standard deviation in price
+demand_variability <- 0.1  # 10% standard deviation in demand
+
+revenue_simulation <- simulate_revenue(
+  base_price, 
+  price_elasticity, 
+  price_variability, 
+  demand_variability,
+  n_simulations = 1000
+)
+
+# Analyze results
+revenue_summary <- revenue_simulation %>%
+  group_by(price_adj) %>%
+  summarize(
+    mean_revenue = mean(revenue),
+    median_revenue = median(revenue),
+    p10_revenue = quantile(revenue, 0.1),
+    p90_revenue = quantile(revenue, 0.9),
+    sd_revenue = sd(revenue),
+    cv_revenue = sd_revenue / mean_revenue  # Coefficient of variation
+  )
+
+# Find optimal price adjustment
+optimal_adj <- revenue_summary %>%
+  filter(mean_revenue == max(mean_revenue))
+
+# Visualize revenue by price adjustment
+revenue_plot <- ggplot(revenue_summary, aes(x = price_adj * base_price, y = mean_revenue)) +
+  geom_line(size = 1.2, color = "blue") +
+  geom_point(size = 3, color = "red") +
+  geom_ribbon(aes(ymin = p10_revenue, ymax = p90_revenue), alpha = 0.2) +
+  geom_vline(xintercept = optimal_adj$price_adj * base_price, 
+             linetype = "dashed", color = "darkgreen") +
+  annotate("text", 
+           x = optimal_adj$price_adj * base_price + 5, 
+           y = max(revenue_summary$mean_revenue) * 0.8,
+           label = paste("Optimal price:", 
+                         round(optimal_adj$price_adj * base_price, 2),
+                         "Euro"),
+           hjust = 0) +
+  labs(title = "Revenue Optimization via Monte Carlo Simulation",
+       subtitle = paste("Base price:", base_price, "Euro, Price elasticity:", price_elasticity),
+       x = "Price (Euro)",
+       y = "Expected Revenue (Euro)") +
+  theme_minimal()
+
+# Visualize risk (coefficient of variation) by price adjustment
+risk_plot <- ggplot(revenue_summary, aes(x = price_adj * base_price, y = cv_revenue)) +
+  geom_line(size = 1.2, color = "purple") +
+  geom_point(size = 3) +
+  geom_vline(xintercept = optimal_adj$price_adj * base_price, 
+             linetype = "dashed", color = "darkgreen") +
+  labs(title = "Revenue Variability by Price Level",
+       x = "Price (Euro)",
+       y = "Coefficient of Variation (lower = less risky)") +
+  theme_minimal()
+
+# Display plots
+grid.arrange(revenue_plot, risk_plot, nrow = 2)
+
+# Distribution of revenue at optimal price
+optimal_dist <- revenue_simulation %>%
+  filter(price_adj == optimal_adj$price_adj)
+
+ggplot(optimal_dist, aes(x = revenue)) +
+  geom_histogram(bins = 30, fill = "steelblue", alpha = 0.7) +
+  geom_vline(xintercept = mean(optimal_dist$revenue), 
+             linetype = "dashed", color = "red") +
+  annotate("text", 
+           x = mean(optimal_dist$revenue) * 1.1, 
+           y = 50,
+           label = paste("Mean:", round(mean(optimal_dist$revenue), 2))) +
+  labs(title = paste("Revenue Distribution at Optimal Price:", 
+                     round(optimal_adj$price_adj * base_price, 2), "Euro"),
+       x = "Revenue (Euro)",
+       y = "Frequency") +
+  theme_minimal()
+```
+
+# Conclusion and Recommendations
+
+## Summary of Findings
+
+1. **Price Sensitivity**:
+   - Our simulations suggest an average price elasticity of demand of [value].
+   - The optimal pricing point to maximize revenue appears to be [value]% [above/below] current average prices.
+   - Price sensitivity varies across neighborhoods, with [neighborhood] showing the highest elasticity.
+
+2. **Neighborhood Effects**:
+   - Changes in neighborhood popularity can have significant impacts on demand, with a [value]% change in popularity leading to a [value]% change in demand.
+   - Popularity changes in one neighborhood create spillover effects in others, particularly between [neighborhood1] and [neighborhood2].
+
+3. **Seasonal Patterns**:
+   - Berlin shows strong seasonal demand patterns with peaks in [months] and troughs in [months].
+   - Major events can increase demand by [value]% to [value]%, particularly in central neighborhoods.
+   - Different neighborhoods show varying seasonal patterns, with [neighborhood] having the most pronounced seasonality.
+
+4. **Revenue Optimization**:
+   - Monte Carlo simulations suggest that hosts can optimize revenue by adjusting prices based on seasonal demand and neighborhood-specific factors.
+   - The risk-return profile varies by price point, with higher prices generally associated with higher variability in outcomes.
+
+## Recommendations for Stakeholders
+
+### For Hosts:
+- Adjust pricing seasonally, increasing rates by approximately [value]% during peak months.
+- Properties in [neighborhood] should consider [recommendation].
+- During major events, pricing can be increased by [value]% in central areas.
+- Balance revenue maximization with risk tolerance when setting prices.
+
+### For Policymakers:
+- Consider the impact of tourism promotion on neighborhood demand patterns.
+- Events have substantial localized impacts that may require planning for accommodations and services.
+- Seasonal demand fluctuations create uneven pressure on local infrastructure.
+
+### For Platform Operators:
+- Dynamic pricing algorithms should account for neighborhood-specific elasticities.
+- Provide hosts with insights about upcoming events and their expected impact on demand.
+- Consider tools to help hosts optimize pricing based on seasonal patterns.
+
+## Next Steps
+
+1. Validate simulations with actual booking data when available
+2. Incorporate more external factors (e.g., economic indicators, travel restrictions)
+3. Develop more granular temporal simulations (e.g., day of week, holiday effects)
+4. Create an interactive tool for hosts to simulate pricing strategies
+5. Expand analysis to include competing accommodation options 

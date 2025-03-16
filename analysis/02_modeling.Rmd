@@ -1,0 +1,341 @@
+---
+title: "Berlin Airbnb Rental Demand Prediction - Modeling"
+author: "Data Science Team"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: cosmo
+    highlight: tango
+    code_folding: show
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, 
+                     warning = FALSE, 
+                     message = FALSE,
+                     fig.width = 10, 
+                     fig.height = 6)
+
+# Load necessary libraries
+library(tidyverse)      # For data manipulation and visualization
+library(caret)          # For modeling
+library(randomForest)   # For random forest models
+library(gbm)            # For gradient boosting
+library(e1071)          # For SVM
+library(glmnet)         # For regularized regression
+library(ggplot2)        # For visualization
+library(pROC)           # For ROC curves
+library(knitr)          # For tables
+```
+
+# Introduction
+
+This document outlines the modeling approach for predicting Airbnb rental demand in Berlin. We will develop multiple models to predict our demand proxy and compare their performance.
+
+## Data Loading
+
+First, we need to load the preprocessed dataset:
+
+```{r load_data}
+# Set the file path
+processed_data_path <- "../data/processed/"
+
+# Check if processed data exists
+if (!file.exists(paste0(processed_data_path, "airbnb_berlin_clean.csv"))) {
+  message("Processed data file not found! Please run the data preprocessing script first.")
+}
+
+# Placeholder for data loading code
+# airbnb_data <- read.csv(paste0(processed_data_path, "airbnb_berlin_clean.csv"))
+
+# For now, create a sample dataset
+set.seed(123)
+n <- 1000  # sample size
+airbnb_data <- data.frame(
+  listing_id = 1:n,
+  price = runif(n, 40, 300),
+  accommodates = sample(1:8, n, replace = TRUE),
+  bedrooms = sample(1:4, n, replace = TRUE),
+  bathrooms = sample(c(1, 1.5, 2, 2.5, 3), n, replace = TRUE),
+  neighborhood = sample(c("Mitte", "Kreuzberg", "Neukölln", "Prenzlauer Berg", "Friedrichshain"), n, replace = TRUE),
+  room_type = sample(c("Entire home/apt", "Private room", "Shared room"), n, replace = TRUE),
+  reviews = rpois(n, 20),
+  overall_rating = rnorm(n, 4.5, 0.5),
+  distance_to_center = runif(n, 0, 8),
+  # Generate a demand proxy for demonstration
+  demand_proxy = runif(n, 0, 1)
+)
+
+# Display sample data
+kable(head(airbnb_data))
+```
+
+# Data Preparation for Modeling
+
+Before building models, we need to prepare the data:
+
+```{r data_prep}
+# Handle categorical variables
+airbnb_model_data <- airbnb_data %>%
+  # Convert categorical variables to factors
+  mutate(
+    neighborhood = as.factor(neighborhood),
+    room_type = as.factor(room_type)
+  )
+
+# Split into features and target
+X <- airbnb_model_data %>% select(-c(listing_id, demand_proxy))
+y <- airbnb_model_data$demand_proxy
+
+# Create dummy variables for categorical features
+X_dummy <- model.matrix(~ . - 1, data = X)
+
+# Split data into training and testing sets
+set.seed(123)
+train_index <- createDataPartition(y, p = 0.8, list = FALSE)
+X_train <- X_dummy[train_index, ]
+X_test <- X_dummy[-train_index, ]
+y_train <- y[train_index]
+y_test <- y[-train_index]
+
+# Scaling numeric features for some models
+preproc <- preProcess(X_train, method = c("center", "scale"))
+X_train_scaled <- predict(preproc, X_train)
+X_test_scaled <- predict(preproc, X_test)
+```
+
+# Modeling Approaches
+
+We'll test several modeling approaches and compare their performance.
+
+## 1. Linear Regression
+
+```{r linear_regression}
+# Basic linear regression
+lm_model <- lm(y_train ~ ., data = as.data.frame(X_train))
+
+# Model summary
+summary(lm_model)
+
+# Predictions
+lm_pred <- predict(lm_model, as.data.frame(X_test))
+
+# Evaluation
+lm_rmse <- sqrt(mean((lm_pred - y_test)^2))
+lm_mae <- mean(abs(lm_pred - y_test))
+lm_r2 <- cor(lm_pred, y_test)^2
+
+cat("Linear Regression Results:\n")
+cat("RMSE:", lm_rmse, "\n")
+cat("MAE:", lm_mae, "\n")
+cat("R-squared:", lm_r2, "\n")
+```
+
+## 2. Random Forest
+
+```{r random_forest}
+# Train random forest model
+rf_model <- randomForest(
+  x = X_train,
+  y = y_train,
+  ntree = 100,
+  mtry = floor(sqrt(ncol(X_train))),
+  importance = TRUE
+)
+
+# Model summary
+print(rf_model)
+
+# Feature importance
+varImpPlot(rf_model, top = 10, main = "Random Forest Feature Importance")
+
+# Predictions
+rf_pred <- predict(rf_model, X_test)
+
+# Evaluation
+rf_rmse <- sqrt(mean((rf_pred - y_test)^2))
+rf_mae <- mean(abs(rf_pred - y_test))
+rf_r2 <- cor(rf_pred, y_test)^2
+
+cat("Random Forest Results:\n")
+cat("RMSE:", rf_rmse, "\n")
+cat("MAE:", rf_mae, "\n")
+cat("R-squared:", rf_r2, "\n")
+```
+
+## 3. Gradient Boosting
+
+```{r gradient_boosting}
+# Train gradient boosting model
+gbm_model <- gbm(
+  y_train ~ .,
+  data = as.data.frame(X_train),
+  distribution = "gaussian",
+  n.trees = 500,
+  interaction.depth = 4,
+  shrinkage = 0.01,
+  cv.folds = 5,
+  verbose = FALSE
+)
+
+# Find optimal number of trees
+best_iter <- gbm.perf(gbm_model, method = "cv")
+print(paste("Best iteration:", best_iter))
+
+# Predictions
+gbm_pred <- predict(gbm_model, as.data.frame(X_test), n.trees = best_iter)
+
+# Evaluation
+gbm_rmse <- sqrt(mean((gbm_pred - y_test)^2))
+gbm_mae <- mean(abs(gbm_pred - y_test))
+gbm_r2 <- cor(gbm_pred, y_test)^2
+
+cat("Gradient Boosting Results:\n")
+cat("RMSE:", gbm_rmse, "\n")
+cat("MAE:", gbm_mae, "\n")
+cat("R-squared:", gbm_r2, "\n")
+
+# Feature importance
+summary(gbm_model, n.trees = best_iter, plotit = TRUE, cBars = 10)
+```
+
+## 4. Elastic Net Regression
+
+```{r elastic_net}
+# Train elastic net model with cross-validation
+set.seed(123)
+en_cv <- cv.glmnet(
+  x = X_train_scaled,
+  y = y_train,
+  alpha = 0.5,  # Elastic net mixing parameter (0.5 = mix of ridge and lasso)
+  nfolds = 5
+)
+
+# Plot cross-validation results
+plot(en_cv)
+
+# Best lambda
+best_lambda <- en_cv$lambda.min
+cat("Best lambda:", best_lambda, "\n")
+
+# Final model with best lambda
+en_model <- glmnet(
+  x = X_train_scaled,
+  y = y_train,
+  alpha = 0.5,
+  lambda = best_lambda
+)
+
+# Coefficients
+coef_en <- coef(en_model)
+important_coefs <- coef_en[abs(coef_en) > 0, ]
+kable(as.data.frame(important_coefs[order(abs(important_coefs), decreasing = TRUE)[1:10]]))
+
+# Predictions
+en_pred <- predict(en_model, newx = X_test_scaled, s = best_lambda)
+
+# Evaluation
+en_rmse <- sqrt(mean((en_pred - y_test)^2))
+en_mae <- mean(abs(en_pred - y_test))
+en_r2 <- cor(en_pred, y_test)^2
+
+cat("Elastic Net Results:\n")
+cat("RMSE:", en_rmse, "\n")
+cat("MAE:", en_mae, "\n")
+cat("R-squared:", en_r2, "\n")
+```
+
+# Model Comparison
+
+Let's compare the performance of all models:
+
+```{r model_comparison}
+# Create comparison dataframe
+model_comparison <- data.frame(
+  Model = c("Linear Regression", "Random Forest", "Gradient Boosting", "Elastic Net"),
+  RMSE = c(lm_rmse, rf_rmse, gbm_rmse, en_rmse),
+  MAE = c(lm_mae, rf_mae, gbm_mae, en_mae),
+  R_squared = c(lm_r2, rf_r2, gbm_r2, en_r2)
+)
+
+# Sort by RMSE (lower is better)
+model_comparison <- model_comparison[order(model_comparison$RMSE), ]
+
+# Display comparison
+kable(model_comparison)
+
+# Visualize comparison
+ggplot(model_comparison, aes(x = reorder(Model, -RMSE), y = RMSE)) +
+  geom_bar(stat = "identity", fill = "steelblue", alpha = 0.7) +
+  labs(title = "Model Comparison - RMSE",
+       x = "Model",
+       y = "RMSE (lower is better)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+ggplot(model_comparison, aes(x = reorder(Model, R_squared), y = R_squared)) +
+  geom_bar(stat = "identity", fill = "steelblue", alpha = 0.7) +
+  labs(title = "Model Comparison - R²",
+       x = "Model",
+       y = "R² (higher is better)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+# Final Model Selection and Predictions
+
+Based on the performance metrics, we'll select the best model and make predictions:
+
+```{r final_model}
+# Choose the best model (placeholder - in reality, would be based on comparison results)
+best_model <- rf_model  # Placeholder - would be determined by actual results
+best_model_name <- "Random Forest"  # Placeholder
+
+# Generate predictions
+predicted_demand <- predict(best_model, X_test)
+
+# Visualize actual vs predicted
+prediction_df <- data.frame(
+  Actual = y_test,
+  Predicted = predicted_demand
+)
+
+ggplot(prediction_df, aes(x = Actual, y = Predicted)) +
+  geom_point(alpha = 0.5, color = "blue") +
+  geom_abline(slope = 1, intercept = 0, color = "red", linetype = "dashed") +
+  labs(title = paste("Actual vs Predicted Demand -", best_model_name),
+       x = "Actual Demand",
+       y = "Predicted Demand") +
+  theme_minimal()
+
+# Residual plot
+prediction_df$Residual <- prediction_df$Actual - prediction_df$Predicted
+
+ggplot(prediction_df, aes(x = Predicted, y = Residual)) +
+  geom_point(alpha = 0.5) +
+  geom_hline(yintercept = 0, color = "red", linetype = "dashed") +
+  labs(title = paste("Residual Plot -", best_model_name),
+       x = "Predicted Demand",
+       y = "Residual (Actual - Predicted)") +
+  theme_minimal()
+```
+
+# Conclusion and Next Steps
+
+This document has demonstrated the modeling approach for predicting Airbnb rental demand in Berlin. Based on our analysis:
+
+1. [Model name] performs best among the tested models with an RMSE of [value] and R² of [value].
+2. The most important features for predicting demand are [feature1], [feature2], and [feature3].
+3. The model shows [good/moderate/poor] predictive power, explaining [x]% of the variance in rental demand.
+
+Next steps include:
+
+1. Further hyperparameter tuning to improve model performance
+2. Examining additional feature engineering options
+3. Testing more advanced modeling techniques (e.g., neural networks)
+4. Spatial analysis to better account for neighborhood effects
+5. Simulation of demand under different scenarios
+
+The selected model can be saved for deployment and used to make predictions on new listings or to analyze demand patterns in different Berlin neighborhoods. 
