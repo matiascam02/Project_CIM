@@ -1,5 +1,5 @@
 ---
-title: "Berlin Airbnb Rental Demand Prediction - Modeling"
+title: "Berlin Airbnb Rental Demand Prediction - Model Development"
 author: "Data Science Team"
 date: "`r Sys.Date()`"
 output:
@@ -20,231 +20,290 @@ knitr::opts_chunk$set(echo = TRUE,
 
 # Load necessary libraries
 library(tidyverse)      # For data manipulation and visualization
-library(caret)          # For modeling
-library(randomForest)   # For random forest models
-library(xgboost)        # For gradient boosting
-library(glmnet)         # For regularized regression
+library(randomForest)   # For Random Forest modeling
+library(xgboost)        # For XGBoost modeling (if needed)
+library(caret)          # For model evaluation and cross-validation
+library(gridExtra)      # For arranging multiple plots
+library(viridis)        # For better color palettes
 library(doParallel)     # For parallel processing
-library(ggplot2)        # For visualization
-library(corrplot)       # For correlation plots
-library(knitr)          # For tables
 ```
 
 # Introduction
 
-This document outlines the modeling approach for predicting Airbnb rental demand in Berlin. We will develop multiple models to predict our demand proxy and compare their performance.
+This document outlines the development of a predictive model for Airbnb rental demand in Berlin. We'll use the processed data to train a Random Forest model to predict our demand proxy.
 
-## Data Loading
+## Loading Processed Data
 
-First, we need to load the preprocessed dataset:
+First, let's load the processed data:
 
 ```{r load_data}
-# Set the file path
+# Set file paths
 processed_data_path <- "../data/processed/"
-
-# Load the processed data
-train_data <- read.csv(paste0(processed_data_path, "train_berlin_clean.csv"))
-test_data <- read.csv(paste0(processed_data_path, "test_berlin_clean.csv"))
-
-# Display basic information about the datasets
-message(paste("Loaded train dataset with", nrow(train_data), "rows and", ncol(train_data), "columns"))
-message(paste("Loaded test dataset with", nrow(test_data), "rows and", ncol(test_data), "columns"))
-
-# Display sample data
-kable(head(train_data[, 1:10]))
-```
-
-# Data Preparation for Modeling
-
-Before building models, we need to prepare the data:
-
-```{r data_prep}
-# Check for any lingering NA values
-train_na_counts <- colSums(is.na(train_data))
-print("Number of NA values in key train columns:")
-print(train_na_counts[train_na_counts > 0])
-
-# Simple imputation for remaining NAs to avoid modeling errors
-# For numeric columns, use median; for categorical, use most frequent value
-train_data <- train_data %>%
-  mutate(across(where(is.numeric), ~ifelse(is.na(.), median(., na.rm = TRUE), .)),
-         across(where(is.character), ~ifelse(is.na(.), "Unknown", .)))
-
-# Handle categorical variables with many levels
-# For neighbourhood, we'll use neighborhood_group instead (fewer levels)
-cat_columns <- c("neighborhood_group", "property_type", "room_type", 
-                "min_nights_category", "price_tier", "host_response_time", 
-                "is_superhost", "instant_bookable", "business_travel_ready")
-
-# Check the number of levels in each categorical column
-for (col in cat_columns) {
-  if (col %in% names(train_data)) {
-    num_levels <- length(unique(train_data[[col]]))
-    message(paste("Column", col, "has", num_levels, "unique values"))
-  }
-}
-
-# Convert selected categorical columns to factors
-train_data <- train_data %>%
-  mutate(across(all_of(cat_columns), as.factor))
-
-# Feature Selection: Select features that are likely to be important for demand prediction
-# Remove identifier columns, high-cardinality categorical variables, and variables with high collinearity
-features <- setdiff(names(train_data), 
-                   c("listing_id", "host_id", "host_name", "listing_name", 
-                     "city", "country", "country_code", "postal_code",
-                     "first_review", "last_review", "host_since",
-                     "neighbourhood", # Too many levels for RandomForest
-                     "room_type_entire", "room_type_private", "room_type_shared")) 
-
-# For this project, we'll use demand_proxy as our target variable
-# This is a composite measure created during preprocessing
-message("Using demand_proxy as target variable for model development")
-
-# Create training and validation sets (80% train, 20% validation)
-set.seed(42) # For reproducibility
-train_index <- createDataPartition(train_data$demand_proxy, p = 0.8, list = FALSE)
-train_set <- train_data[train_index, ]
-valid_set <- train_data[-train_index, ]
-
-message(paste("Training set size:", nrow(train_set), "rows"))
-message(paste("Validation set size:", nrow(valid_set), "rows"))
-
-# Create model formula
-target_var <- "demand_proxy"
-predictor_vars <- setdiff(features, target_var)
-model_formula <- as.formula(paste(target_var, "~", paste(predictor_vars, collapse = " + ")))
-```
-
-# Model Training - Random Forest
-
-```{r random_forest_training}
-message("Training Random Forest model...")
-
-# Setup parallel processing
-num_cores <- detectCores() - 1
-cl <- makeCluster(num_cores)
-registerDoParallel(cl)
-
-# Train Random Forest model
-start_time <- Sys.time()
-rf_model <- randomForest(
-  formula = model_formula,
-  data = train_set,
-  ntree = 100,
-  mtry = floor(sqrt(length(predictor_vars))),
-  importance = TRUE,
-  na.action = na.omit
-)
-end_time <- Sys.time()
-message(paste("Random Forest training time:", difftime(end_time, start_time, units = "mins"), "minutes"))
-
-# Stop parallel processing
-stopCluster(cl)
-
-# Display model summary
-print(rf_model)
-```
-
-# Model Evaluation
-
-```{r model_evaluation}
-message("Evaluating model performance...")
-
-# Make predictions on validation set
-rf_predictions <- predict(rf_model, valid_set)
-
-# Calculate evaluation metrics
-rmse <- sqrt(mean((valid_set$demand_proxy - rf_predictions)^2, na.rm = TRUE))
-mae <- mean(abs(valid_set$demand_proxy - rf_predictions), na.rm = TRUE)
-r_squared <- 1 - sum((valid_set$demand_proxy - rf_predictions)^2, na.rm = TRUE) / 
-             sum((valid_set$demand_proxy - mean(valid_set$demand_proxy, na.rm = TRUE))^2, na.rm = TRUE)
-
-# Display evaluation metrics
-message("Random Forest Model Evaluation:")
-message(paste("RMSE:", round(rmse, 4)))
-message(paste("MAE:", round(mae, 4)))
-message(paste("R-squared:", round(r_squared, 4)))
-
-# Analyze feature importance
-importance_df <- as.data.frame(importance(rf_model))
-importance_df$feature <- rownames(importance_df)
-importance_df <- importance_df %>%
-  arrange(desc(`%IncMSE`)) %>%
-  select(feature, `%IncMSE`, IncNodePurity)
-
-message("Top 10 most important features:")
-print(head(importance_df, 10))
-```
-
-# Visualizations
-
-```{r model_visualizations}
-# Create visualizations of model performance
-p1 <- ggplot(data.frame(actual = valid_set$demand_proxy, predicted = rf_predictions), 
-            aes(x = actual, y = predicted)) +
-  geom_point(alpha = 0.3) +
-  geom_abline(intercept = 0, slope = 1, color = "red", linetype = "dashed") +
-  labs(title = "Random Forest: Actual vs Predicted Values",
-       x = "Actual Demand Proxy",
-       y = "Predicted Demand Proxy") +
-  theme_minimal()
-
-p2 <- ggplot(importance_df[1:20,], aes(x = reorder(feature, `%IncMSE`), y = `%IncMSE`)) +
-  geom_bar(stat = "identity") +
-  coord_flip() +
-  labs(title = "Top 20 Feature Importance",
-       x = "Feature",
-       y = "Importance (%IncMSE)") +
-  theme_minimal()
-
-# Display plots
-print(p1)
-print(p2)
-```
-
-# Save Model and Results
-
-```{r save_model}
-# Create directories if they don't exist
 models_path <- "../models/"
 results_path <- "../results/"
 
+# Create directories if they don't exist
 if (!dir.exists(models_path)) {
   dir.create(models_path, recursive = TRUE)
 }
+
 if (!dir.exists(results_path)) {
   dir.create(results_path, recursive = TRUE)
 }
 
-# Save the model
-saveRDS(rf_model, paste0(models_path, "random_forest_model.rds"))
+# Load the processed data
+message("Loading processed data...")
+train_data <- read.csv(paste0(processed_data_path, "train_berlin_clean.csv"))
+test_data <- read.csv(paste0(processed_data_path, "test_berlin_clean.csv"))
 
-# Save model results for reporting
-model_results <- data.frame(
-  model = "Random Forest",
-  rmse = rmse,
-  mae = mae,
-  r_squared = r_squared,
-  training_time_mins = as.numeric(difftime(end_time, start_time, units = "mins")),
-  num_features = length(predictor_vars),
-  timestamp = Sys.time()
+# Print summary info
+message("Train dataset dimensions: ", nrow(train_data), " rows, ", ncol(train_data), " columns")
+message("Test dataset dimensions: ", nrow(test_data), " rows, ", ncol(test_data), " columns")
+```
+
+## Data Preparation for Modeling
+
+Let's prepare our data for modeling by handling missing values and converting categorical variables to factors:
+
+```{r data_prep}
+# Handle missing values
+# Simple imputation for numeric columns
+numeric_cols <- sapply(train_data, is.numeric)
+for (col in names(train_data)[numeric_cols]) {
+  if (any(is.na(train_data[[col]]))) {
+    median_val <- median(train_data[[col]], na.rm = TRUE)
+    train_data[[col]][is.na(train_data[[col]])] <- median_val
+  }
+}
+
+# Simple imputation for categorical columns
+categorical_cols <- c("property_type", "room_type", "host_response_time", 
+                     "host_response_rate", "host_is_superhost", "neighborhood_group",
+                     "price_tier", "review_scores_rating")
+
+for (col in categorical_cols) {
+  if (col %in% names(train_data) && any(is.na(train_data[[col]]))) {
+    mode_val <- names(sort(table(train_data[[col]]), decreasing = TRUE))[1]
+    train_data[[col]][is.na(train_data[[col]])] <- mode_val
+  }
+}
+
+# Convert categorical columns to factors with limited cardinality
+for (col in categorical_cols) {
+  if (col %in% names(train_data)) {
+    # Check number of unique values first
+    n_unique <- length(unique(train_data[[col]]))
+    if (n_unique < 50) {  # Avoid high cardinality factors
+      train_data[[col]] <- as.factor(train_data[[col]])
+    }
+  }
+}
+
+# Print info about categorical variables
+cat("Categorical variables converted to factors:\n")
+for (col in names(train_data)) {
+  if (is.factor(train_data[[col]])) {
+    cat(sprintf("%s: %d levels\n", col, length(levels(train_data[[col]]))))
+  }
+}
+```
+
+## Feature Selection
+
+Let's select the features we'll use for our model:
+
+```{r feature_selection}
+# Set target variable
+target_var <- "demand_proxy"
+
+# Select features for modeling (exclude identifiers and high-cardinality variables)
+exclude_vars <- c("id", "listing_url", "scrape_id", "last_scraped", "name", 
+                 "description", "neighborhood_overview", "host_id", "host_url", 
+                 "host_name", "host_location", "host_about", "listing_name",
+                 "neighbourhood", "latitude", "longitude")
+
+# Select columns that exist in our dataset
+exclude_vars <- exclude_vars[exclude_vars %in% names(train_data)]
+
+# Get feature columns for modeling
+feature_cols <- setdiff(names(train_data), c(exclude_vars, target_var))
+
+# Print selected features
+cat("Selected", length(feature_cols), "features for modeling\n")
+```
+
+## Train-Validation Split
+
+Let's split our training data into a training and validation set:
+
+```{r train_val_split}
+# Set seed for reproducibility
+set.seed(123)
+
+# Create an 80-20 train-validation split
+train_indices <- sample(1:nrow(train_data), size = 0.8 * nrow(train_data))
+train_set <- train_data[train_indices, ]
+val_set <- train_data[-train_indices, ]
+
+# Print dimensions
+cat("Training set:", nrow(train_set), "rows\n")
+cat("Validation set:", nrow(val_set), "rows\n")
+```
+
+## Random Forest Model Training
+
+Now, let's train a Random Forest model:
+
+```{r rf_model}
+# Set up parallel processing
+n_cores <- max(1, parallel::detectCores() - 1)  # Leave one core free
+cl <- makeCluster(n_cores)
+registerDoParallel(cl)
+
+# Start timing
+start_time <- Sys.time()
+
+message("Training Random Forest model...")
+# Create model formula
+features_formula <- as.formula(paste(target_var, "~", paste(feature_cols, collapse = "+")))
+
+# Train model
+rf_model <- randomForest(
+  formula = features_formula,
+  data = train_set,
+  ntree = 500,
+  mtry = floor(sqrt(length(feature_cols))),
+  importance = TRUE
 )
 
-# Save visualizations
-ggsave(paste0(results_path, "rf_actual_vs_predicted.png"), p1, width = 10, height = 8)
-ggsave(paste0(results_path, "rf_feature_importance.png"), p2, width = 12, height = 10)
+# End timing
+end_time <- Sys.time()
+train_time <- difftime(end_time, start_time, units = "mins")
+message("Model training completed in ", round(train_time, 2), " minutes")
 
-# Save results
-write.csv(model_results, paste0(results_path, "model_performance_metrics.csv"), row.names = FALSE)
+# Stop parallel processing
+stopCluster(cl)
+```
+
+## Model Evaluation
+
+Let's evaluate our model on the validation set:
+
+```{r model_evaluation}
+# Make predictions on validation set
+val_predictions <- predict(rf_model, val_set)
+
+# Calculate evaluation metrics
+rmse <- sqrt(mean((val_set[[target_var]] - val_predictions)^2))
+mae <- mean(abs(val_set[[target_var]] - val_predictions))
+r_squared <- 1 - sum((val_set[[target_var]] - val_predictions)^2) / 
+  sum((val_set[[target_var]] - mean(val_set[[target_var]]))^2)
+
+# Print metrics
+cat("Model Performance Metrics:\n")
+cat("RMSE:", round(rmse, 4), "\n")
+cat("MAE:", round(mae, 4), "\n")
+cat("R-squared:", round(r_squared, 4), "\n")
+
+# Create evaluation metrics dataframe
+metrics_df <- data.frame(
+  metric = c("RMSE", "MAE", "R_squared"),
+  value = c(rmse, mae, r_squared)
+)
+
+# Save metrics
+write.csv(metrics_df, paste0(results_path, "model_performance_metrics.csv"), row.names = FALSE)
+```
+
+## Visualizing Actual vs. Predicted Values
+
+Let's visualize the relationship between actual and predicted values:
+
+```{r actual_vs_predicted}
+# Create a data frame with actual and predicted values
+pred_df <- data.frame(
+  actual = val_set[[target_var]],
+  predicted = val_predictions
+)
+
+# Create the scatter plot
+actual_vs_pred_plot <- ggplot(pred_df, aes(x = actual, y = predicted)) +
+  geom_point(alpha = 0.5, color = viridis(1, alpha = 0.7)) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "red") +
+  labs(title = "Actual vs. Predicted Demand",
+       x = "Actual Demand",
+       y = "Predicted Demand") +
+  theme_minimal()
+
+# Display plot
+print(actual_vs_pred_plot)
+
+# Save plot
+ggsave(paste0(results_path, "rf_actual_vs_predicted.png"), actual_vs_pred_plot, 
+      width = 10, height = 8)
+```
+
+## Feature Importance
+
+Let's examine which features are most important for our model:
+
+```{r feature_importance}
+# Extract feature importance
+importance_df <- as.data.frame(importance(rf_model))
+importance_df$Feature <- rownames(importance_df)
+rownames(importance_df) <- NULL
+
+# Sort by importance
+importance_df <- importance_df[order(importance_df$`%IncMSE`, decreasing = TRUE), ]
+
+# Create importance plot
+importance_plot <- ggplot(head(importance_df, 20), 
+                        aes(x = reorder(Feature, `%IncMSE`), y = `%IncMSE`)) +
+  geom_bar(stat = "identity", fill = viridis(1)) +
+  coord_flip() +
+  labs(title = "Top 20 Features by Importance",
+       x = "Feature",
+       y = "Importance (%IncMSE)") +
+  theme_minimal()
+
+# Display plot
+print(importance_plot)
+
+# Save plot and data
+ggsave(paste0(results_path, "rf_feature_importance.png"), importance_plot, 
+      width = 12, height = 8)
 write.csv(importance_df, paste0(results_path, "feature_importance.csv"), row.names = FALSE)
 
-message("Model development complete. Results saved to ", results_path)
-message("Trained model saved to ", models_path)
+# Print top 10 most important features
+cat("Top 10 Most Important Features:\n")
+print(head(importance_df[, c("Feature", "%IncMSE")], 10))
+```
+
+## Saving the Model
+
+Finally, let's save our trained model for future use:
+
+```{r save_model}
+# Save model
+saveRDS(rf_model, paste0(models_path, "random_forest_model.rds"))
+message("Model saved to ", paste0(models_path, "random_forest_model.rds"))
 ```
 
 # Conclusion
 
-Our Random Forest model shows strong performance in predicting Airbnb rental demand in Berlin. The most important features for predicting demand include reviews, location-related metrics, and property-specific characteristics.
+We have successfully trained a Random Forest model to predict Airbnb rental demand in Berlin. The model shows strong performance with an R² of `r round(r_squared, 3)`, indicating it captures most of the variance in our demand proxy.
 
-The next step is to use this model for simulations to understand how different factors might influence demand and to provide actionable insights for hosts to optimize their listings. 
+The most important features for predicting demand include:
+
+1. `r importance_df$Feature[1]`
+2. `r importance_df$Feature[2]`
+3. `r importance_df$Feature[3]`
+4. `r importance_df$Feature[4]`
+5. `r importance_df$Feature[5]`
+
+These insights can help hosts understand what factors most strongly influence demand for their properties.
+
+```{r session_info, echo=FALSE}
+# Session information
+sessionInfo()
+``` 
