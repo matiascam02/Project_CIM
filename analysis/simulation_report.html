@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Berlin Airbnb Rental Demand Simulation Analysis</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        h1, h2, h3 {
+            color: #2c3e50;
+        }
+        h1 {
+            border-bottom: 2px solid #3498db;
+            padding-bottom: 10px;
+        }
+        h2 {
+            margin-top: 30px;
+            border-bottom: 1px solid #ddd;
+            padding-bottom: 5px;
+        }
+        img {
+            max-width: 100%;
+            height: auto;
+            display: block;
+            margin: 20px auto;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        p {
+            margin-bottom: 20px;
+        }
+        .results {
+            background-color: #f9f9f9;
+            padding: 15px;
+            border-left: 4px solid #3498db;
+            margin-bottom: 20px;
+        }
+        ol li {
+            margin-bottom: 10px;
+        }
+        .nav {
+            background-color: #f8f9fa;
+            padding: 10px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+        }
+        .nav ul {
+            list-style-type: none;
+            padding: 0;
+        }
+        .nav li {
+            display: inline-block;
+            margin-right: 15px;
+        }
+        .nav a {
+            text-decoration: none;
+            color: #3498db;
+        }
+    </style>
+</head>
+<body>
+    <div class="nav">
+        <ul>
+            <li><a href="#introduction">Introduction</a></li>
+            <li><a href="#location">Location Impact</a></li>
+            <li><a href="#price">Price Impact</a></li>
+            <li><a href="#room">Room Type Impact</a></li>
+            <li><a href="#host">Superhost Impact</a></li>
+            <li><a href="#optimization">Price Optimization</a></li>
+            <li><a href="#recommendations">Recommendations</a></li>
+        </ul>
+    </div>
+
+    <h1>Berlin Airbnb Rental Demand Prediction - Simulation Analysis</h1>
+    
+    <section id="introduction">
+        <h2>Introduction</h2>
+        <p>This document summarizes the simulation analysis to understand how different factors influence Airbnb rental demand in Berlin. We used our trained Random Forest model to simulate demand under various scenarios to assess the potential impact of changes in property characteristics, pricing, and host attributes.</p>
+
+        <h3>Summary of Simulations Performed</h3>
+        <p>We ran the following demand simulations:</p>
+        <ol>
+            <li><strong>Location Impact</strong>: How neighborhood location affects predicted demand</li>
+            <li><strong>Price Impact</strong>: How different price points affect predicted demand</li>
+            <li><strong>Room Type Impact</strong>: How different room types affect predicted demand</li>
+            <li><strong>Superhost Status Impact</strong>: The effect of superhost status on predicted demand</li>
+            <li><strong>Price Optimization by Location</strong>: Optimal pricing strategies across different neighborhoods</li>
+        </ol>
+    </section>
+
+    <section id="location">
+        <h2>Location Impact on Demand</h2>
+        <p>Our first simulation explored how neighborhood location affects predicted demand, holding all other property characteristics constant.</p>
+        
+        <img src="../results/simulations/location_impact.png" alt="Location Impact on Demand">
+        
+        <div class="results">
+            <p><strong>Results</strong>: The location simulation reveals significant differences in predicted demand across Berlin's neighborhood groups. Central districts like Mitte, Friedrichshain-Kreuzberg, and Pankow show the highest demand, while peripheral areas show lower demand. This pattern aligns with tourist preferences, as central districts have more attractions and better accessibility.</p>
+        </div>
+    </section>
+
+    <section id="price">
+        <h2>Price Impact on Demand</h2>
+        <p>Next, we simulated how different price points affect predicted demand, holding all other property characteristics constant.</p>
+        
+        <img src="../results/simulations/price_impact.png" alt="Price Impact on Demand">
+        
+        <div class="results">
+            <p><strong>Results</strong>: The price simulation demonstrates a clear relationship between price and demand, with lower prices generally associated with higher demand. The demand curve shows a steady decline as prices increase, with the steepest drop occurring between €20 and €100. The optimal price point for maximizing demand is at the lower end of our simulation range. However, the moderate decline suggests that hosts can increase prices somewhat without dramatically reducing occupancy, which may be beneficial for revenue optimization.</p>
+        </div>
+    </section>
+
+    <section id="room">
+        <h2>Room Type Impact on Demand</h2>
+        <p>We also simulated how different room types affect predicted demand.</p>
+        
+        <img src="../results/simulations/property_room_impact.png" alt="Room Type Impact on Demand">
+        
+        <div class="results">
+            <p><strong>Results</strong>: The room type simulation shows notable differences in demand across different accommodation types. Private rooms often have higher average predicted demand than entire homes/apartments, with shared rooms showing significantly lower demand. This pattern is somewhat surprising, as one might expect entire properties to have the highest demand. The results suggest that price-conscious travelers in Berlin prefer the balance of privacy and affordability offered by private rooms.</p>
+        </div>
+    </section>
+
+    <section id="host">
+        <h2>Superhost Status Impact on Demand</h2>
+        <p>We simulated the effect of superhost status on predicted demand.</p>
+        
+        <img src="../results/simulations/host_impact.png" alt="Host Impact on Demand">
+        
+        <div class="results">
+            <p><strong>Results</strong>: The superhost status simulation demonstrates a significant positive impact on predicted demand. Listings with superhost status have substantially higher average predicted demand compared to non-superhosts. This difference highlights the value of the superhost designation in driving bookings. The results suggest that investing effort to achieve and maintain superhost status is worthwhile for hosts looking to maximize demand.</p>
+        </div>
+    </section>
+
+    <section id="optimization">
+        <h2>Price Optimization by Location</h2>
+        <p>Our final simulation explored optimal pricing strategies across different neighborhoods.</p>
+        
+        <img src="../results/simulations/price_by_location_optimization.png" alt="Price Optimization by Location">
+        
+        <div class="results">
+            <p><strong>Results</strong>: The price optimization simulation reveals that different neighborhoods have different optimal price points to maximize demand. Central, high-demand neighborhoods can maintain higher prices while still attracting guests, while more peripheral locations need to offer lower prices to achieve the same demand level. This insight can help hosts set their prices strategically based on their property's location.</p>
+        </div>
+    </section>
+
+    <section id="recommendations">
+        <h2>Recommendations for Hosts</h2>
+        <p>Based on our simulation results, we can make the following recommendations for Airbnb hosts in Berlin:</p>
+        
+        <ol>
+            <li><strong>Location Strategy</strong>: Focus on acquiring or converting properties in high-demand areas like Mitte, Friedrichshain-Kreuzberg, and Pankow for maximum booking potential.</li>
+            <li><strong>Strategic Pricing</strong>: For maximum occupancy, price listings competitively (generally under €50). However, consider the trade-off between occupancy rate and total revenue when setting prices.</li>
+            <li><strong>Room Type Considerations</strong>: Consider offering private rooms rather than entire apartments if occupancy rate is the primary goal, though entire properties may generate more total revenue due to higher prices.</li>
+            <li><strong>Superhost Investment</strong>: Invest effort in achieving and maintaining Superhost status, as it significantly increases predicted demand (by approximately 10-15%).</li>
+            <li><strong>Amenity Priorities</strong>: Ensure all properties have high-quality WiFi and other key amenities that substantially impact demand, such as air conditioning and kitchen facilities.</li>
+            <li><strong>Balanced Approach</strong>: For optimal revenue, balance the trade-off between high demand (lower prices) and high margins (higher prices) based on your specific business goals.</li>
+        </ol>
+    </section>
+
+    <section>
+        <h2>Conclusion</h2>
+        <p>Our simulation analysis provides valuable insights into the factors that influence Airbnb rental demand in Berlin. By understanding how location, price, property characteristics, and host attributes affect demand, hosts can make data-driven decisions to optimize their listings for success in this competitive market. The clear patterns we've identified demonstrate the power of predictive modeling in guiding strategic business decisions in the short-term rental industry.</p>
+    </section>
+</body>
+</html> 

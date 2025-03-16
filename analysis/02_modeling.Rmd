@@ -345,7 +345,16 @@ The most important features for predicting demand include:
 4. `r importance_df$feature[4]`
 5. `r importance_df$feature[5]`
 
-These insights can help hosts understand what factors most strongly influence demand for their properties.
+These insights can help hosts understand what factors most strongly influence demand for their properties. Our next step is to use this trained model in simulations to analyze the relationships between different property characteristics and demand more thoroughly.
+
+The simulations in the next notebook (03_simulation.Rmd) will explore:
+- How location affects demand
+- The relationship between price and demand
+- Impact of property and room types
+- Effect of host experience and superhost status
+- Price optimization strategies by neighborhood
+
+These simulations will provide actionable insights for hosts looking to maximize their bookings and revenue.
 
 ```{r session_info, echo=FALSE}
 # Session information

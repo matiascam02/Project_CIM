@@ -623,7 +623,7 @@ if("demand_proxy" %in% names(train_data_with_proxy)) {
     
     # Visualize average demand by neighborhood
     ggplot(top_demand_neighborhoods, 
-           aes(x = reorder(!!sym(neighborhood_col), avg_demand)) +
+           aes(x = reorder(!!sym(neighborhood_col), avg_demand))) +
       geom_bar(stat = "identity", fill = "steelblue") +
       coord_flip() +
       labs(title = "Top 15 Neighborhoods by Average Demand",
@@ -633,36 +633,3 @@ if("demand_proxy" %in% names(train_data_with_proxy)) {
   }
 }
 ```
-
-# Conclusion and Next Steps
-
-Based on our exploratory data analysis, we've identified several key insights:
-
-1. **Price Distribution**: [Summary of price distribution findings]
-2. **Geographic Patterns**: [Summary of geographic patterns]
-3. **Neighborhood Analysis**: [Summary of neighborhood effects]
-4. **Property Features**: [Summary of how property features relate to price/demand]
-5. **Demand Patterns**: [Summary of demand proxy findings]
-
-## Next Steps
-
-1. **Feature Engineering**: Create additional variables such as:
-   - Price per person (price/accommodates)
-   - Distance to city center or tourist hotspots
-   - Seasonal indicators
-   
-2. **Data Preparation**:
-   - Handle missing values appropriately
-   - Encode categorical variables
-   - Scale and normalize numeric features
-   
-3. **Modeling**:
-   - Develop regression models to predict price
-   - Develop classification models for demand categories
-   - Compare different algorithms and evaluate performance
-   
-4. **Simulations**:
-   - Create simulations for different scenarios affecting rental demand
-   - Analyze potential impacts of market changes
-
-The next step is to proceed with data preprocessing and feature engineering, followed by predictive modeling as outlined in the subsequent R Markdown files. 
