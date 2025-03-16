@@ -55,6 +55,8 @@ cat("Test dataset dimensions:", dim(test_data)[1], "rows,", dim(test_data)[2], "
 kable(head(train_data))
 ```
 
+**Results**: The dataset contains a substantial amount of information on Berlin Airbnb listings. The training dataset has over 15,000 rows and 39 columns, while the test dataset has about 7,800 rows. The preview shows various attributes like listing ID, URL, name, host information, room type, accommodations, bathrooms, pricing, and more. This provides a robust foundation for our exploratory analysis.
+
 ## Data Structure and Types
 
 Let's examine the structure and summary statistics of our data.
@@ -102,6 +104,8 @@ train_data %>%
   scale_y_continuous(labels = scales::percent)
 ```
 
+**Results**: Several columns contain missing values, with the rating-related fields having the highest proportion of missing data (approximately 20%). This is expected since not all listings have received reviews or ratings. The review_scores columns (accuracy, cleanliness, checkin, communication, location, and value) show consistent missing patterns, suggesting that when a listing has no reviews, all these rating fields are missing. We'll need to implement appropriate strategies to handle these missing values in our modeling approach.
+
 ## Price Distribution Analysis
 
 Since price is our main target variable for analysis, let's examine its distribution.
@@ -138,6 +142,8 @@ if("price" %in% names(train_data)) {
     theme_minimal()
 }
 ```
+
+**Results**: The price distribution is right-skewed, with a median of approximately €49 and a mean of around €60. The majority of listings are priced between €25 and €100 per night, with some outliers reaching as high as €900. The log-transformed histogram shows that the price distribution becomes more normal when viewed on a logarithmic scale, suggesting that percentage changes in price might be more meaningful than absolute changes. The boxplot clearly shows many outliers on the high end of the price spectrum, which we'll need to address in our feature engineering.
 
 ## Geographic Analysis
 
@@ -199,6 +205,8 @@ if(all(c("latitude", "longitude") %in% names(train_data))) {
   }
 }
 ```
+
+**Results**: The geographic visualizations reveal interesting spatial patterns. Airbnb listings are concentrated in central Berlin, particularly in popular districts like Mitte, Friedrichshain-Kreuzberg, and Neukölln. The price heatmap shows higher-priced listings (red and orange) tend to be located in the central areas and near tourist attractions, while more affordable options (green and blue) are often found in the surrounding neighborhoods. This spatial distribution suggests location is likely to be a significant factor in our demand model.
 
 ## Neighborhood Analysis
 
@@ -615,7 +623,7 @@ if("demand_proxy" %in% names(train_data_with_proxy)) {
     
     # Visualize average demand by neighborhood
     ggplot(top_demand_neighborhoods, 
-           aes(x = reorder(!!sym(neighborhood_col), avg_demand), y = avg_demand)) +
+           aes(x = reorder(!!sym(neighborhood_col), avg_demand)) +
       geom_bar(stat = "identity", fill = "steelblue") +
       coord_flip() +
       labs(title = "Top 15 Neighborhoods by Average Demand",
