@@ -1,2 +1,4 @@
-"model","rmse","mae","r_squared","training_time_mins","num_features","timestamp"
-"Random Forest",0.010846687727181,0.00479161986766039,0.980915661596317,0.410658983389537,47,2025-03-16 15:39:15.019414
+"metric","value"
+"RMSE",0.0112388649768725
+"MAE",0.0049314648320211
+"R_squared",0.980694290136574
