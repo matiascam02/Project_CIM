@@ -5,10 +5,11 @@ This project develops a machine learning model to predict Airbnb rental demand a
 
 ## Key Findings
 - **Location is Critical**: Central districts like Mitte and Friedrichshain-Kreuzberg show 20-40% higher demand
-- **Price Sensitivity**: Lower-priced listings attract higher occupancy rates, with €20-50 range showing optimal demand
-- **Room Type Matters**: Private rooms often outperform entire apartments in raw demand measures
-- **Superhost Status**: Increases demand by approximately 12.5%
-- **Essential Amenities**: WiFi is the most impactful amenity, boosting demand by ~15%
+- **Price Sensitivity**: Demand is highest at moderate price points (€40-60) and decreases as prices increase
+- **Room Type Matters**: Private rooms often maintain high demand levels due to their affordability and practicality
+- **Superhost Status**: Increases demand by approximately 15-25%, with greater impact for experienced hosts
+- **Host Experience**: Each additional year of hosting experience progressively increases predicted demand
+- **Price Optimization**: Different neighborhoods have distinct optimal price points for maximizing demand
 
 ## Dataset
 The analysis uses the "Airbnb Berlin Price Prediction" dataset, which includes:
@@ -33,11 +34,13 @@ Project_CIM/
 ├── analysis/        # R markdown files for analysis
 │   ├── 01_exploratory_data_analysis.Rmd  # EDA with visualizations
 │   ├── 02_modeling.Rmd                   # Model development and evaluation
-│   └── 03_simulation.Rmd                 # Scenario simulations
+│   ├── 03_simulation.Rmd                 # Scenario simulations
+│   └── simulation_report.html            # Lightweight simulation results report
 ├── models/          # Trained models
 ├── results/         # Model evaluation metrics and simulation results
+│   └── simulations/ # Detailed simulation results and visualizations
 ├── figs/            # Generated figures and visualizations
-└── project_findings.md  # Detailed documentation of findings
+└── README.md        # Project overview and instructions
 ```
 
 ## Methodology
@@ -55,11 +58,11 @@ Project_CIM/
    - MAE: 0.005
 
 4. **Simulations**: We conducted extensive simulations to understand how different factors affect demand:
-   - Location-based simulations
-   - Price optimization
-   - Room type comparisons
-   - Superhost status impact
-   - Amenity importance analysis
+   - Location-based simulations with neighborhood comparisons
+   - Price-demand curve analysis showing optimal price points
+   - Room type and property type impact analysis
+   - Host experience and superhost status effects
+   - Price optimization strategies by neighborhood
 
 ## Installation and Setup
 
@@ -95,18 +98,27 @@ Project_CIM/
    Rscript scripts/03_demand_simulation.R
    ```
 
-4. For detailed analysis, open the R Markdown files in RStudio:
+4. For detailed analysis, open the R Markdown files in RStudio and knit them:
    - `analysis/01_exploratory_data_analysis.Rmd`
    - `analysis/02_modeling.Rmd`
    - `analysis/03_simulation.Rmd`
 
+5. Alternatively, view the pre-generated HTML reports:
+   - `analysis/03_simulation.html` (Full analysis with code)
+   - `analysis/simulation_report.html` (Simplified results summary)
+
 ## Recommendations for Hosts
-1. Focus on acquiring or converting properties in high-demand central districts
-2. Price listings competitively (under €50) for maximum occupancy
-3. Consider offering private rooms rather than entire apartments if occupancy rate is the primary goal
-4. Invest effort in achieving and maintaining Superhost status
-5. Ensure all properties have high-quality WiFi and essential amenities
-6. Balance the trade-off between high demand (lower prices) and high margins (higher prices)
+1. **Location Strategy**: Focus on properties in central districts like Mitte, Friedrichshain-Kreuzberg, and Prenzlauer Berg for maximum booking potential.
+
+2. **Strategic Pricing**: Price listings around €40-60 for the best balance between demand and revenue, adjusting based on your specific neighborhood.
+
+3. **Room Type Considerations**: Consider offering private rooms as they maintain good demand levels while requiring less investment than entire apartments.
+
+4. **Superhost Investment**: Prioritize achieving and maintaining Superhost status, as it significantly increases predicted demand (15-25%).
+
+5. **Experience Building**: Maintain consistent hosting activity, as increased experience on the platform progressively improves demand.
+
+6. **Neighborhood-Specific Pricing**: Adjust pricing strategies based on your specific location - central neighborhoods can command higher prices while maintaining demand.
 
 ## Dependencies
 - tidyverse (data manipulation and visualization)
@@ -115,7 +127,6 @@ Project_CIM/
 - sf (for spatial analysis)
 - knitr and kableExtra (for reporting)
 - scales (for formatting)
-- leaflet (for interactive maps)
 - viridis (for enhanced visualizations)
 
 ## Contact
