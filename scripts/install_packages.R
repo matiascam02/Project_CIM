@@ -3,104 +3,95 @@
 # ==============================================================================
 # install_packages.R
 #
-# This script installs all required packages for the Airbnb Berlin rental 
-# demand prediction project.
+# This script installs all required R packages for the Airbnb Berlin rental 
+# demand prediction project. It checks for existing packages and installs
+# any that are missing.
 # ==============================================================================
 
-# Print message
-cat("Installing required packages for the Airbnb Berlin Rental Demand Prediction project...\n")
-
-# Required packages
-packages <- c(
+# List of required packages
+required_packages <- c(
   # Core packages
-  "tidyverse",   # For data manipulation and visualization
-  "lubridate",   # For date manipulation
-  "janitor",     # For data cleaning
+  "tidyverse",    # For data manipulation and visualization
+  "janitor",      # For data cleaning
+  "lubridate",    # For date handling
   
   # Visualization
-  "ggplot2",     # For visualization (included in tidyverse, but listed for clarity)
-  "corrplot",    # For correlation plots
-  "GGally",      # For ggpairs plots
-  "gridExtra",   # For arranging multiple plots
+  "ggplot2",      # For creating plots
+  "viridis",      # For color palettes
+  "gridExtra",    # For arranging multiple plots
+  "scales",       # For formatting plot scales
+  "corrplot",     # For correlation plots
+  "GGally",       # For pair plots
   
   # Spatial analysis
-  "sf",          # For spatial data
-  "leaflet",     # For interactive maps
+  "sf",           # For spatial data handling
+  "leaflet",      # For interactive maps
   
-  # Data exploration and reporting
-  "skimr",       # For data summarization
-  "knitr",       # For R Markdown rendering
-  "rmarkdown",   # For R Markdown
+  # Data exploration
+  "skimr",        # For data summaries
+  "knitr",        # For report generation
+  "rmarkdown",    # For creating R Markdown documents
   
   # Modeling
-  "caret",       # For model training and evaluation
-  "randomForest", # For random forest models
-  "gbm",         # For gradient boosting
-  "glmnet",      # For regularized regression
-  "e1071",       # For SVM
-  "pROC",        # For ROC curves
+  "caret",        # For model training and evaluation
+  "randomForest", # For Random Forest models
+  "xgboost",      # For Gradient Boosting models
+  "glmnet",       # For regularized regression
+  "doParallel",   # For parallel processing
   
-  # Time series and simulation
-  "forecast",    # For time series forecasting
-  "MASS"         # For statistical functions
+  # Time series (if needed)
+  "forecast",     # For time series forecasting
+  "tseries"       # For time series analysis
 )
 
-# Check which packages are already installed
-installed_packages <- rownames(installed.packages())
-packages_to_install <- packages[!packages %in% installed_packages]
-
-# Install missing packages
-if (length(packages_to_install) > 0) {
-  cat("Installing", length(packages_to_install), "packages:\n")
-  cat(paste(packages_to_install, collapse = ", "), "\n\n")
-  
-  for (pkg in packages_to_install) {
-    cat("Installing", pkg, "...\n")
-    install.packages(pkg, repos = "https://cloud.r-project.org")
+# Function to check and install packages
+install_if_missing <- function(package) {
+  if (!require(package, character.only = TRUE, quietly = TRUE)) {
+    message(paste("Installing package:", package))
+    install.packages(package, dependencies = TRUE, repos = "https://cloud.r-project.org")
+    if (!require(package, character.only = TRUE, quietly = TRUE)) {
+      warning(paste("Failed to install package:", package))
+      return(FALSE)
+    }
+  } else {
+    message(paste("Package already installed:", package))
   }
-} else {
-  cat("All required packages are already installed.\n")
+  return(TRUE)
 }
 
-# Verify installation
-installed_packages <- rownames(installed.packages())
-missing_packages <- packages[!packages %in% installed_packages]
+# Install packages
+message("Checking and installing required packages...")
+results <- sapply(required_packages, install_if_missing)
 
-if (length(missing_packages) > 0) {
-  cat("\nWARNING: The following packages could not be installed:\n")
-  cat(paste(missing_packages, collapse = ", "), "\n")
-  cat("Please install them manually using install.packages() or troubleshoot any installation issues.\n")
+# Report results
+if (all(results)) {
+  message("All packages successfully installed or already available.")
 } else {
-  cat("\nSuccess! All required packages are now installed.\n")
+  missing_packages <- required_packages[!results]
+  warning(paste("Failed to install the following packages:", 
+                paste(missing_packages, collapse = ", ")))
   
-  # Load all packages to verify they work
-  cat("\nLoading packages to verify installation...\n")
-  for (pkg in packages) {
-    tryCatch({
-      library(pkg, character.only = TRUE)
-      cat(pkg, "loaded successfully.\n")
-    }, error = function(e) {
-      cat("Error loading", pkg, ":", e$message, "\n")
-    })
+  # Special note for sf package which often requires system dependencies
+  if ("sf" %in% missing_packages) {
+    message("
+    Note: The 'sf' package requires additional system dependencies:
+    - On Ubuntu/Debian: sudo apt-get install libudunits2-dev libgdal-dev libgeos-dev libproj-dev
+    - On macOS with Homebrew: brew install gdal
+    - On Windows: No additional steps needed, but installation may take longer.
+    ")
   }
-  
-  cat("\nSetup complete! You're ready to start analyzing Airbnb data in Berlin.\n")
 }
 
-# Check for system dependencies for spatial packages
-if ("sf" %in% packages) {
-  sf_status <- tryCatch({
-    library(sf)
-    TRUE
+# Verify that key packages can be loaded
+message("\nVerifying package loading:")
+for (pkg in required_packages) {
+  tryCatch({
+    library(pkg, character.only = TRUE)
+    detach(paste0("package:", pkg), character.only = TRUE, unload = TRUE)
+    message(paste("Successfully loaded:", pkg))
   }, error = function(e) {
-    FALSE
+    warning(paste("Failed to load package:", pkg))
   })
-  
-  if (!sf_status) {
-    cat("\nNOTE: The 'sf' package requires additional system dependencies:\n")
-    cat("- On Ubuntu/Debian: sudo apt-get install libudunits2-dev libgdal-dev libgeos-dev libproj-dev\n")
-    cat("- On CentOS/RHEL: sudo yum install udunits2-devel gdal-devel geos-devel proj-devel\n")
-    cat("- On macOS (with Homebrew): brew install udunits gdal geos proj\n")
-    cat("- On Windows: No additional steps required, dependencies are included in the binary package\n")
-  }
-} 
+}
+
+message("\nPackage installation process complete.") 
