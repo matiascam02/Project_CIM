@@ -1,0 +1,6 @@
+"Modified_Value","Predicted_Demand","Feature"
+"Apartment",0.471976217672389,"property_type"
+"Condominium",0.558491125525836,"property_type"
+"House",0.717935415707456,"property_type"
+"Loft",0.713525419571229,"property_type"
+"Bed and breakfast",0.786464386758047,"property_type"

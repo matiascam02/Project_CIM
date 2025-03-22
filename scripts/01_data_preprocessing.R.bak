@@ -1,0 +1,425 @@
+#!/usr/bin/env Rscript
+
+# ==============================================================================
+# 01_data_preprocessing.R
+# 
+# This script performs data preprocessing for the Airbnb Berlin rental demand 
+# prediction project. It cleans, transforms, and prepares the data for analysis.
+#
+# Key tasks:
+# 1. Standardize column names to lowercase snake_case
+# 2. Handle missing values with appropriate imputation strategies
+# 3. Create a demand_proxy target variable based on review metrics
+# 4. Engineer additional features for modeling
+# 5. Save processed datasets for analysis and modeling
+# ==============================================================================
+
+# Load required libraries
+library(tidyverse)  # For data manipulation
+library(lubridate)  # For date handling
+library(janitor)    # For cleaning column names
+
+# Define file paths - using existing files in the data directory
+data_path <- "../data/raw/"
+processed_data_path <- "../data/processed/"
+
+# Create directories if they don't exist
+if (!dir.exists(data_path)) {
+  dir.create(data_path, recursive = TRUE)
+  message("Created raw data directory")
+}
+
+if (!dir.exists(processed_data_path)) {
+  dir.create(processed_data_path, recursive = TRUE)
+  message("Created processed data directory")
+}
+
+# Check if train and test data exist
+if (!file.exists(paste0(data_path, "train_airbnb_berlin.csv")) || 
+    !file.exists(paste0(data_path, "test_airbnb_berlin.csv"))) {
+  stop("Train or test data files not found in the data directory.")
+}
+
+# -------------------------------------------------------------------------------
+# Data Loading
+# -------------------------------------------------------------------------------
+
+# Load the data
+message("Loading train and test data...")
+train_data <- read.csv(paste0(data_path, "train_airbnb_berlin.csv"), stringsAsFactors = FALSE)
+test_data <- read.csv(paste0(data_path, "test_airbnb_berlin.csv"), stringsAsFactors = FALSE)
+
+# Exploring data dimensions
+message(paste("Loaded train dataset with", nrow(train_data), "rows and", ncol(train_data), "columns"))
+message(paste("Loaded test dataset with", nrow(test_data), "rows and", ncol(test_data), "columns"))
+
+# Display original column names for reference
+message("Original train dataset column names:")
+print(colnames(train_data))
+
+# -------------------------------------------------------------------------------
+# Data Cleaning
+# -------------------------------------------------------------------------------
+
+message("Starting data cleaning process...")
+
+# Clean column names (convert to lowercase snake_case)
+# This step is crucial for consistent column naming throughout the analysis
+train_clean <- train_data %>%
+  clean_names()
+
+test_clean <- test_data %>%
+  clean_names()
+
+# Print column names after cleaning 
+message("Train column names after cleaning (all lowercase):")
+print(names(train_clean))
+
+# Convert numeric columns that are stored as character
+message("Converting character columns to appropriate types...")
+
+# Get numeric columns based on attempts to convert
+numeric_cols <- names(train_clean)[sapply(train_clean, function(x) !all(is.na(as.numeric(suppressWarnings(as.character(x))))))]
+# Filter out obvious non-numeric columns
+numeric_cols <- numeric_cols[!numeric_cols %in% c("id", "listing_url", "name", "host_id", "host_name", 
+                                                 "neighbourhood", "property_type", "room_type", 
+                                                 "host_response_time", "host_response_rate")]
+
+# Print identified numeric columns
+message("Converting these columns to numeric:")
+print(numeric_cols)
+
+# Create a function to convert columns to numeric
+convert_to_numeric <- function(df, cols) {
+  for (col in cols) {
+    if (col %in% names(df)) {
+      df[[col]] <- as.numeric(as.character(df[[col]]))
+    }
+  }
+  return(df)
+}
+
+# Apply conversion to both datasets
+train_clean <- convert_to_numeric(train_clean, numeric_cols)
+test_clean <- convert_to_numeric(test_clean, numeric_cols)
+
+# Fix any naming inconsistencies
+if ("accomodates" %in% names(train_clean)) {
+  names(train_clean)[names(train_clean) == "accomodates"] <- "accommodates"
+}
+if ("accomodates" %in% names(test_clean)) {
+  names(test_clean)[names(test_clean) == "accomodates"] <- "accommodates"
+}
+
+# Convert date columns to proper date format
+date_cols <- c("first_review", "last_review", "host_since")
+for(col in date_cols) {
+  if(col %in% names(train_clean)) {
+    train_clean[[col]] <- as.Date(train_clean[[col]])
+    message(paste("Converted", col, "to Date format"))
+  }
+  if(col %in% names(test_clean)) {
+    test_clean[[col]] <- as.Date(test_clean[[col]])
+  }
+}
+
+# -------------------------------------------------------------------------------
+# Handling Missing Values 
+# -------------------------------------------------------------------------------
+
+message("Handling missing values...")
+
+# Check for missing values
+missing_values <- colSums(is.na(train_clean))
+message("Columns with missing values in train data:")
+print(missing_values[missing_values > 0])
+
+# Handle missing values for numeric columns
+numeric_cols <- names(train_clean)[sapply(train_clean, is.numeric)]
+for (col in numeric_cols) {
+  if (sum(is.na(train_clean[[col]])) > 0) {
+    # Impute with median
+    median_val <- median(train_clean[[col]], na.rm = TRUE)
+    train_clean[[col]][is.na(train_clean[[col]])] <- median_val
+    
+    # Also apply to test data if the column exists
+    if (col %in% names(test_clean)) {
+      test_clean[[col]][is.na(test_clean[[col]])] <- median_val
+    }
+    
+    message(paste("Imputed missing values in", col, "with median", median_val))
+  }
+}
+
+# Handle missing values for categorical columns
+cat_cols <- names(train_clean)[sapply(train_clean, is.character)]
+for (col in cat_cols) {
+  if (sum(is.na(train_clean[[col]])) > 0 || sum(train_clean[[col]] == "") > 0) {
+    # Replace empty strings with NA
+    train_clean[[col]][train_clean[[col]] == ""] <- NA
+    
+    # Find mode (most common value)
+    mode_val <- names(sort(table(train_clean[[col]]), decreasing = TRUE))[1]
+    train_clean[[col]][is.na(train_clean[[col]])] <- mode_val
+    
+    # Also apply to test data if the column exists
+    if (col %in% names(test_clean)) {
+      test_clean[[col]][test_clean[[col]] == ""] <- NA
+      test_clean[[col]][is.na(test_clean[[col]])] <- mode_val
+    }
+    
+    message(paste("Imputed missing values in", col, "with mode", mode_val))
+  }
+}
+
+# -------------------------------------------------------------------------------
+# Feature Engineering
+# -------------------------------------------------------------------------------
+
+message("Creating features and demand proxy...")
+
+# -------------------------------------------------------
+# 1. Create a demand proxy (our target variable)
+# -------------------------------------------------------
+# The demand_proxy is a composite measure of rental demand
+# based on reviews and availability. It represents the 
+# estimated popularity/booking rate of Airbnb properties.
+# -------------------------------------------------------
+
+message("Creating demand_proxy target variable...")
+
+if ("reviews" %in% names(train_clean)) {
+  # Normalize reviews (higher = more demand)
+  # This converts the raw review count to a 0-1 scale
+  max_reviews <- max(train_clean$reviews, na.rm = TRUE)
+  train_clean$review_score <- train_clean$reviews / max_reviews
+  message("Created review_score from reviews column (scale 0-1)")
+  
+  # Create availability score using quantiles of reviews
+  # Higher quantiles = higher inferred availability demand
+  # Using 4 quantiles (5 breaks) for consistency
+  quantiles <- quantile(train_clean$reviews, probs = c(0, 0.25, 0.5, 0.75, 1), na.rm = TRUE)
+  message(paste("Review quantiles for availability scoring:", 
+                paste(round(quantiles, 2), collapse = ", ")))
+  
+  # Convert to an availability score with 4 levels (0, 0.25, 0.5, 0.75)
+  train_clean$availability_score <- as.numeric(as.character(
+    cut(train_clean$reviews, 
+        breaks = quantiles,
+        labels = c("0", "0.25", "0.5", "0.75"),
+        include.lowest = TRUE)
+  ))
+  message("Created availability_score as a proxy from reviews column (scale 0-0.75)")
+  
+  # Combined demand score (average of review and availability scores)
+  # This gives a more balanced measure of property demand
+  train_clean$demand_proxy <- (train_clean$review_score + train_clean$availability_score) / 2
+  message("Created demand_proxy from review_score and availability_score (scale 0-1)")
+  
+  # Also add a binary version for classification tasks
+  train_clean$high_demand <- ifelse(train_clean$demand_proxy > median(train_clean$demand_proxy, na.rm = TRUE), 1, 0)
+  message("Created high_demand binary feature (1 = above median demand)")
+  
+} else if ("price" %in% names(train_clean)) {
+  # Fallback to price-based proxy if reviews not available
+  message("WARNING: No reviews data found, using price as fallback for demand proxy")
+  max_price <- max(train_clean$price, na.rm = TRUE)
+  train_clean$demand_proxy <- train_clean$price / max_price
+  train_clean$high_demand <- ifelse(train_clean$demand_proxy > median(train_clean$demand_proxy, na.rm = TRUE), 1, 0)
+  message("Created demand_proxy from price (fallback method, scale 0-1)")
+} else {
+  # Last resort - random values
+  message("WARNING: Neither reviews nor price available, creating random demand proxy")
+  set.seed(123)
+  train_clean$demand_proxy <- runif(nrow(train_clean))
+  train_clean$high_demand <- ifelse(train_clean$demand_proxy > 0.5, 1, 0)
+  message("Created random demand_proxy as last resort (scale 0-1)")
+}
+
+# -------------------------------------------------------
+# 2. Additional Feature Engineering
+# -------------------------------------------------------
+
+message("Creating additional features...")
+
+# Define Berlin city center coordinates (approximate, near Alexanderplatz)
+berlin_center_lat <- 52.52
+berlin_center_lng <- 13.405
+
+# Create features for demand prediction
+train_clean <- train_clean %>%
+  mutate(
+    # Location-based features
+    distance_to_center_km = if("latitude" %in% names(.) && "longitude" %in% names(.)) {
+      sqrt((latitude - berlin_center_lat)^2 + (longitude - berlin_center_lng)^2) * 111
+    } else {
+      NA
+    },
+    
+    # Price features
+    price_per_person = if("price" %in% names(.) && "accommodates" %in% names(.)) {
+      ifelse(accommodates > 0, price / accommodates, price)
+    } else {
+      NA
+    },
+    
+    # Price tier categories for easier analysis
+    price_tier = if("price" %in% names(.)) {
+      case_when(
+        price <= 50 ~ "budget",
+        price <= 100 ~ "moderate",
+        price <= 200 ~ "premium",
+        TRUE ~ "luxury"
+      )
+    } else {
+      NA
+    },
+    
+    # Host experience features
+    host_experience_days = if("host_since" %in% names(.)) {
+      as.numeric(difftime(Sys.Date(), host_since, units = "days"))
+    } else {
+      NA
+    },
+    
+    # Host features
+    is_superhost_numeric = if("is_superhost" %in% names(.)) {
+      ifelse(is_superhost == "t", 1, 0)
+    } else {
+      NA
+    },
+    
+    # Room type features - one-hot encoding
+    room_type_entire = if("room_type" %in% names(.)) {
+      ifelse(grepl("entire", tolower(room_type)), 1, 0)
+    } else {
+      NA
+    },
+    
+    room_type_private = if("room_type" %in% names(.)) {
+      ifelse(grepl("private", tolower(room_type)), 1, 0)
+    } else {
+      NA
+    },
+    
+    room_type_shared = if("room_type" %in% names(.)) {
+      ifelse(grepl("shared", tolower(room_type)), 1, 0)
+    } else {
+      NA
+    },
+    
+    # Minimum nights categories
+    min_nights_category = if("minimum_nights" %in% names(.)) {
+      case_when(
+        minimum_nights == 1 ~ "one_night",
+        minimum_nights <= 3 ~ "short_stay",
+        minimum_nights <= 7 ~ "weekly",
+        TRUE ~ "long_term"
+      )
+    } else {
+      NA
+    }
+  )
+
+# Apply same transformations to test data where possible
+test_clean <- test_clean %>%
+  mutate(
+    # Location-based features
+    distance_to_center_km = if("latitude" %in% names(.) && "longitude" %in% names(.)) {
+      sqrt((latitude - berlin_center_lat)^2 + (longitude - berlin_center_lng)^2) * 111
+    } else {
+      NA
+    },
+    
+    # Price features
+    price_per_person = if("price" %in% names(.) && "accommodates" %in% names(.)) {
+      ifelse(accommodates > 0, price / accommodates, price)
+    } else {
+      NA
+    },
+    
+    # Price tier categories
+    price_tier = if("price" %in% names(.)) {
+      case_when(
+        price <= 50 ~ "budget",
+        price <= 100 ~ "moderate",
+        price <= 200 ~ "premium",
+        TRUE ~ "luxury"
+      )
+    } else {
+      NA
+    },
+    
+    # Host experience features
+    host_experience_days = if("host_since" %in% names(.)) {
+      as.numeric(difftime(Sys.Date(), host_since, units = "days"))
+    } else {
+      NA
+    },
+    
+    # Host features
+    is_superhost_numeric = if("is_superhost" %in% names(.)) {
+      ifelse(is_superhost == "t", 1, 0)
+    } else {
+      NA
+    },
+    
+    # Room type features - one-hot encoding
+    room_type_entire = if("room_type" %in% names(.)) {
+      ifelse(grepl("entire", tolower(room_type)), 1, 0)
+    } else {
+      NA
+    },
+    
+    room_type_private = if("room_type" %in% names(.)) {
+      ifelse(grepl("private", tolower(room_type)), 1, 0)
+    } else {
+      NA
+    },
+    
+    room_type_shared = if("room_type" %in% names(.)) {
+      ifelse(grepl("shared", tolower(room_type)), 1, 0)
+    } else {
+      NA
+    },
+    
+    # Minimum nights categories
+    min_nights_category = if("minimum_nights" %in% names(.)) {
+      case_when(
+        minimum_nights == 1 ~ "one_night",
+        minimum_nights <= 3 ~ "short_stay",
+        minimum_nights <= 7 ~ "weekly",
+        TRUE ~ "long_term"
+      )
+    } else {
+      NA
+    }
+  )
+
+# -------------------------------------------------------------------------------
+# Export processed data
+# -------------------------------------------------------------------------------
+
+message("Saving processed data...")
+
+# Create a summary of the preprocessing steps
+preprocessing_summary <- data.frame(
+  original_cols = ncol(train_data),
+  cleaned_cols = ncol(train_clean),
+  rows = nrow(train_clean),
+  demand_proxy_method = ifelse("reviews" %in% names(train_clean), 
+                              "reviews-based", 
+                              ifelse("price" %in% names(train_clean), "price-based", "random")),
+  date_processed = Sys.Date()
+)
+
+# Save summary
+write.csv(preprocessing_summary, paste0(processed_data_path, "preprocessing_summary.csv"), row.names = FALSE)
+
+# Export cleaned data with consistent column naming
+write.csv(train_clean, paste0(processed_data_path, "train_berlin_clean.csv"), row.names = FALSE)
+write.csv(test_clean, paste0(processed_data_path, "test_berlin_clean.csv"), row.names = FALSE)
+
+message("Data preprocessing complete. Files saved with standardized column names to:", processed_data_path)
+message("The demand_proxy target variable has been created based on: ", 
+       preprocessing_summary$demand_proxy_method) 

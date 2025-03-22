@@ -1,0 +1,4 @@
+"Modified_Value","Predicted_Demand","Feature"
+"Entire home/apt",0.477580974137912,"room_type"
+"Private room",0.650792900420669,"room_type"
+"Shared room",0.882348332565965,"room_type"

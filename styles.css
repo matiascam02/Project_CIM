@@ -1,0 +1,88 @@
+/* Presentation Styles */
+
+/* Section headers */
+h1.section {
+  background-color: #0073b7;
+  color: white;
+  padding: 20px;
+  margin-top: 50px;
+  border-radius: 5px;
+  text-align: center;
+}
+
+/* Slide headers */
+h2 {
+  color: #0073b7;
+  border-bottom: 1px solid #ddd;
+  padding-bottom: 10px;
+}
+
+/* Lists */
+ul, ol {
+  font-size: 1.2em;
+  line-height: 1.6;
+}
+
+/* Code blocks */
+pre {
+  background-color: #f8f8f8;
+  border: 1px solid #ddd;
+  border-radius: 5px;
+  padding: 15px;
+}
+
+/* Tables */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 20px 0;
+}
+
+th {
+  background-color: #0073b7;
+  color: white;
+  padding: 10px;
+  text-align: left;
+}
+
+td {
+  padding: 8px;
+  border-bottom: 1px solid #ddd;
+}
+
+/* Images */
+img {
+  max-width: 100%;
+  height: auto;
+  display: block;
+  margin: 20px auto;
+  border: 1px solid #ddd;
+  border-radius: 5px;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+}
+
+/* Contact section */
+#thank-you-section {
+  text-align: center;
+  margin-top: 50px;
+  padding: 30px;
+  background-color: #f8f8f8;
+  border-radius: 5px;
+}
+
+#contact-information {
+  text-align: center;
+}
+
+/* Print-friendly */
+@media print {
+  h1.section {
+    background-color: #f0f0f0 !important;
+    color: #333 !important;
+    page-break-before: always;
+  }
+  
+  @page {
+    margin: 1cm;
+  }
+} 

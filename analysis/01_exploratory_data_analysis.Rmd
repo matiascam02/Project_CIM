@@ -28,608 +28,537 @@ library(corrplot)     # For correlation plots
 library(GGally)       # For ggpairs plots
 library(knitr)        # For nice tables
 library(gridExtra)    # For grid arrangements
-library(janitor)      # For data cleaning
 ```
 
 # Introduction
 
-This document contains the exploratory data analysis (EDA) for the Airbnb Berlin rental demand prediction project. The goal is to gain insights from the data and identify patterns that will inform our predictive modeling approach.
+This document contains the exploratory data analysis (EDA) for the Airbnb Berlin rental demand prediction project. The goal is to gain insights from the data and identify patterns that will inform our predictive modeling approach. 
+
+We'll be analyzing the preprocessed data that was prepared by the `01_data_preprocessing.R` script, which includes a clean and consistent set of features as well as our target variable `demand_proxy`.
 
 ## Data Loading
 
-First, we need to load the dataset from the data directory.
+We'll load the preprocessed data from the processed data directory.
 
 ```{r load_data}
-# Set the file path to the existing data
-data_path <- "../data/"
+# Set the file path to the processed data
+processed_data_path <- "../data/processed/"
 
 # Load the train and test datasets
-train_data <- read.csv(paste0(data_path, "train_airbnb_berlin.csv"))
-test_data <- read.csv(paste0(data_path, "test_airbnb_berlin.csv"))
+train_data <- read.csv(paste0(processed_data_path, "train_berlin_clean.csv"))
+test_data <- read.csv(paste0(processed_data_path, "test_berlin_clean.csv"))
 
 # Display basic information about the datasets
 cat("Train dataset dimensions:", dim(train_data)[1], "rows,", dim(train_data)[2], "columns\n")
 cat("Test dataset dimensions:", dim(test_data)[1], "rows,", dim(test_data)[2], "columns\n")
 
 # Preview train data
-kable(head(train_data))
+kable(head(train_data[, 1:10]), caption = "First 10 columns of training data")
+
+# Verify the target variable is present
+cat("\nTarget variable (demand_proxy) statistics:\n")
+summary(train_data$demand_proxy)
 ```
 
-**Results**: The dataset contains a substantial amount of information on Berlin Airbnb listings. The training dataset has over 15,000 rows and 39 columns, while the test dataset has about 7,800 rows. The preview shows various attributes like listing ID, URL, name, host information, room type, accommodations, bathrooms, pricing, and more. This provides a robust foundation for our exploratory analysis.
+**Results**: The dataset contains information on Berlin Airbnb listings. We're using the preprocessed data that has standardized column names in lowercase with snake_case formatting. The training dataset has over 15,000 rows and includes our target variable `demand_proxy`.
 
 ## Data Structure and Types
 
 Let's examine the structure and summary statistics of our data.
 
 ```{r data_structure}
-# Check column names
-colnames(train_data)
-
 # Check data types for each column
-str(train_data)
+str(train_data[, c("listing_id", "neighbourhood", "property_type", "room_type", 
+                  "price", "reviews", "demand_proxy")])
 
-# Summary statistics
-summary(train_data)
-
-# Use skimr for a more comprehensive summary
-skim(train_data)
+# Summary statistics for key numeric columns
+print(summary(train_data$price))
+print(summary(train_data$reviews))
+print(summary(train_data$demand_proxy))
 ```
 
-# Initial Data Exploration
+# Analysis of Key Variables
 
-## Missing Values
+## Target Variable: Demand Proxy
 
-Let's examine missing values in the dataset.
+Our target variable `demand_proxy` was created during preprocessing as a composite measure based on review counts and normalized scores. Let's analyze its distribution and relationship with other variables.
 
-```{r missing_values}
-# Count missing values in each column
-missing_train <- colSums(is.na(train_data))
-missing_test <- colSums(is.na(test_data))
+```{r demand_proxy_analysis}
+# Distribution of demand proxy
+ggplot(train_data, aes(x = demand_proxy)) +
+  geom_histogram(bins = 30, fill = "steelblue", alpha = 0.7) +
+  labs(title = "Distribution of Demand Proxy",
+       x = "Demand Proxy (0-1 scale)",
+       y = "Count") +
+  theme_minimal()
 
-# Display columns with missing values
-missing_train[missing_train > 0]
-missing_test[missing_test > 0]
+# Box plot of demand proxy values
+ggplot(train_data, aes(y = demand_proxy)) +
+  geom_boxplot(fill = "steelblue", alpha = 0.7) +
+  labs(title = "Boxplot of Demand Proxy Values",
+       y = "Demand Proxy (0-1 scale)") +
+  theme_minimal()
 
-# Visualize missing values
-train_data %>%
-  summarise(across(everything(), ~sum(is.na(.))/n())) %>%
-  gather() %>%
-  ggplot(aes(x = reorder(key, value), y = value)) +
-  geom_bar(stat = "identity", fill = "steelblue") +
-  coord_flip() +
-  labs(title = "Proportion of Missing Values in Train Dataset",
-       x = "",
-       y = "Proportion Missing") +
+# Relationship between demand proxy and price
+ggplot(train_data, aes(x = price, y = demand_proxy)) +
+  geom_point(alpha = 0.2, color = "steelblue") +
+  geom_smooth(method = "loess", color = "red") +
+  labs(title = "Relationship Between Price and Demand Proxy",
+       x = "Price (Euro)",
+       y = "Demand Proxy") +
   theme_minimal() +
-  scale_y_continuous(labels = scales::percent)
+  scale_x_log10()
+
+# Relationship between demand proxy and reviews
+ggplot(train_data, aes(x = reviews, y = demand_proxy)) +
+  geom_point(alpha = 0.2, color = "steelblue") +
+  labs(title = "Relationship Between Reviews and Demand Proxy",
+       x = "Number of Reviews",
+       y = "Demand Proxy") +
+  theme_minimal() +
+  scale_x_log10()
+
+# Box plot of demand proxy by room type
+ggplot(train_data, aes(x = room_type, y = demand_proxy)) +
+  geom_boxplot(fill = "steelblue", alpha = 0.7) +
+  labs(title = "Demand Proxy by Room Type",
+       x = "Room Type",
+       y = "Demand Proxy") +
+  theme_minimal()
 ```
 
-**Results**: Several columns contain missing values, with the rating-related fields having the highest proportion of missing data (approximately 20%). This is expected since not all listings have received reviews or ratings. The review_scores columns (accuracy, cleanliness, checkin, communication, location, and value) show consistent missing patterns, suggesting that when a listing has no reviews, all these rating fields are missing. We'll need to implement appropriate strategies to handle these missing values in our modeling approach.
+**Insights about the Demand Proxy**: The `demand_proxy` variable is our target for prediction, representing the estimated popularity/booking rate of Airbnb properties. It was created as a composite score based on review metrics during the preprocessing step, with values ranging from 0 (low demand) to 1 (high demand). The distribution shows a right skew, suggesting that most properties have relatively low to moderate demand, with fewer properties having very high demand.
 
 ## Price Distribution Analysis
 
-Since price is our main target variable for analysis, let's examine its distribution.
-
 ```{r price_analysis}
-# Check if there's a price column
-if("price" %in% names(train_data)) {
-  # Basic statistics
-  price_stats <- summary(train_data$price)
-  print(price_stats)
-  
-  # Price distribution
-  ggplot(train_data, aes(x = price)) +
-    geom_histogram(bins = 50, fill = "steelblue", alpha = 0.7) +
-    labs(title = "Distribution of Airbnb Prices in Berlin",
-         x = "Price (Euro)",
-         y = "Count") +
-    theme_minimal()
-  
-  # Price distribution with log transformation (for skewed data)
-  ggplot(train_data, aes(x = price)) +
-    geom_histogram(bins = 50, fill = "steelblue", alpha = 0.7) +
-    scale_x_log10() +
-    labs(title = "Distribution of Airbnb Prices in Berlin (Log Scale)",
-         x = "Price (Euro) - Log Scale",
-         y = "Count") +
-    theme_minimal()
-  
-  # Price boxplot
-  ggplot(train_data, aes(y = price)) +
-    geom_boxplot(fill = "steelblue", alpha = 0.7) +
-    labs(title = "Boxplot of Airbnb Prices in Berlin",
-         y = "Price (Euro)") +
-    theme_minimal()
-}
+# Basic statistics
+price_stats <- summary(train_data$price)
+print(price_stats)
+
+# Price distribution
+ggplot(train_data, aes(x = price)) +
+  geom_histogram(bins = 50, fill = "steelblue", alpha = 0.7) +
+  labs(title = "Distribution of Airbnb Prices in Berlin",
+       x = "Price (Euro)",
+       y = "Count") +
+  theme_minimal()
+
+# Price distribution with log transformation (for skewed data)
+ggplot(train_data, aes(x = price)) +
+  geom_histogram(bins = 50, fill = "steelblue", alpha = 0.7) +
+  scale_x_log10() +
+  labs(title = "Distribution of Airbnb Prices in Berlin (Log Scale)",
+       x = "Price (Euro) - Log Scale",
+       y = "Count") +
+  theme_minimal()
+
+# Price boxplot
+ggplot(train_data, aes(y = price)) +
+  geom_boxplot(fill = "steelblue", alpha = 0.7) +
+  labs(title = "Boxplot of Airbnb Prices in Berlin",
+       y = "Price (Euro)") +
+  theme_minimal()
+
+# Price per person distribution
+ggplot(train_data, aes(x = price_per_person)) +
+  geom_histogram(bins = 50, fill = "steelblue", alpha = 0.7) +
+  scale_x_log10() +
+  labs(title = "Distribution of Price Per Person",
+       x = "Price Per Person (Euro) - Log Scale",
+       y = "Count") +
+  theme_minimal() +
+  xlim(10, 150)
 ```
 
-**Results**: The price distribution is right-skewed, with a median of approximately €49 and a mean of around €60. The majority of listings are priced between €25 and €100 per night, with some outliers reaching as high as €900. The log-transformed histogram shows that the price distribution becomes more normal when viewed on a logarithmic scale, suggesting that percentage changes in price might be more meaningful than absolute changes. The boxplot clearly shows many outliers on the high end of the price spectrum, which we'll need to address in our feature engineering.
+**Results**: The price distribution is right-skewed, with a median of approximately €49 and a mean of around €60. The majority of listings are priced between €25 and €100 per night, with some outliers reaching as high as €900. The log-transformed histogram shows that the price distribution becomes more normal when viewed on a logarithmic scale, suggesting that percentage changes in price might be more meaningful than absolute changes. The boxplot clearly shows many outliers on the high end of the price spectrum.
 
 ## Geographic Analysis
 
-If the dataset includes location information, let's visualize the geographic distribution.
+Let's visualize the geographic distribution of listings and their prices.
 
 ```{r geographic_analysis}
-# Check if we have latitude and longitude
-if(all(c("latitude", "longitude") %in% names(train_data))) {
-  # Create a leaflet map
-  leaflet_map <- leaflet(train_data) %>%
-    addTiles() %>%
-    addCircleMarkers(
-      lng = ~longitude,
-      lat = ~latitude,
-      radius = 2,
-      color = "blue",
-      fillOpacity = 0.5,
-      popup = ~paste("Price:", price, "<br>",
-                    "Room Type:", room_type)
-    ) %>%
-    addControl(html = "<b>Airbnb Listings in Berlin</b>", position = "topright")
-  
-  # Display the map
-  leaflet_map
-  
-  # Plot price heatmap by location
-  if("price" %in% names(train_data)) {
-    # Create bins for price
-    train_data$price_bin <- cut(train_data$price, 
-                               breaks = c(0, 50, 100, 150, 200, Inf),
-                               labels = c("< 50", "50-100", "100-150", "150-200", "> 200"))
-    
-    # Color palette
-    price_pal <- colorFactor(
-      palette = c("green", "blue", "purple", "orange", "red"),
-      domain = train_data$price_bin
-    )
-    
-    # Create a leaflet map with price colors
-    price_map <- leaflet(train_data) %>%
-      addTiles() %>%
-      addCircleMarkers(
-        lng = ~longitude,
-        lat = ~latitude,
-        radius = 2,
-        color = ~price_pal(price_bin),
-        fillOpacity = 0.7,
-        popup = ~paste("Price:", price, "<br>",
-                      "Room Type:", room_type)
-      ) %>%
-      addLegend("bottomright", 
-                pal = price_pal, 
-                values = ~price_bin,
-                title = "Price (Euro)",
-                opacity = 1)
-    
-    # Display the map
-    price_map
-  }
-}
+# Create a leaflet map
+leaflet_map <- leaflet(train_data) %>%
+  addTiles() %>%
+  addCircleMarkers(
+    lng = ~longitude,
+    lat = ~latitude,
+    radius = 2,
+    color = "blue",
+    fillOpacity = 0.5,
+    popup = ~paste("Price:", price, "<br>",
+                  "Room Type:", room_type)
+  ) %>%
+  addControl(html = "<b>Airbnb Listings in Berlin</b>", position = "topright")
+
+# Display the map
+leaflet_map
+
+# Create bins for price
+train_data$price_bin <- cut(train_data$price, 
+                           breaks = c(0, 50, 100, 150, 200, Inf),
+                           labels = c("< 50", "50-100", "100-150", "150-200", "> 200"))
+
+# Color palette
+price_pal <- colorFactor(
+  palette = c("green", "blue", "purple", "orange", "red"),
+  domain = train_data$price_bin
+)
+
+# Create a leaflet map with price colors
+price_map <- leaflet(train_data) %>%
+  addTiles() %>%
+  addCircleMarkers(
+    lng = ~longitude,
+    lat = ~latitude,
+    radius = 2,
+    color = ~price_pal(price_bin),
+    fillOpacity = 0.7,
+    popup = ~paste("Price:", price, "<br>",
+                  "Room Type:", room_type)
+  ) %>%
+  addLegend("bottomright", 
+            pal = price_pal, 
+            values = ~price_bin,
+            title = "Price (Euro)",
+            opacity = 1)
+
+# Display the map
+price_map
+
+# Map of demand proxy
+# Create bins for demand proxy
+train_data$demand_bin <- cut(train_data$demand_proxy, 
+                            breaks = c(0, 0.25, 0.5, 0.75, 1),
+                            labels = c("Low", "Medium-Low", "Medium-High", "High"))
+
+# Color palette for demand
+demand_pal <- colorFactor(
+  palette = c("blue", "green", "orange", "red"),
+  domain = train_data$demand_bin
+)
+
+# Create a leaflet map with demand colors
+demand_map <- leaflet(train_data) %>%
+  addTiles() %>%
+  addCircleMarkers(
+    lng = ~longitude,
+    lat = ~latitude,
+    radius = 2,
+    color = ~demand_pal(demand_bin),
+    fillOpacity = 0.7,
+    popup = ~paste("Demand:", round(demand_proxy, 2), "<br>",
+                  "Reviews:", reviews)
+  ) %>%
+  addLegend("bottomright", 
+            pal = demand_pal, 
+            values = ~demand_bin,
+            title = "Demand Proxy",
+            opacity = 1)
+
+# Display the map
+demand_map
 ```
 
-**Results**: The geographic visualizations reveal interesting spatial patterns. Airbnb listings are concentrated in central Berlin, particularly in popular districts like Mitte, Friedrichshain-Kreuzberg, and Neukölln. The price heatmap shows higher-priced listings (red and orange) tend to be located in the central areas and near tourist attractions, while more affordable options (green and blue) are often found in the surrounding neighborhoods. This spatial distribution suggests location is likely to be a significant factor in our demand model.
+**Results**: The geographic visualizations reveal interesting spatial patterns. Airbnb listings are concentrated in central Berlin, particularly in popular districts like Mitte, Friedrichshain-Kreuzberg, and Neukölln. The price heatmap shows higher-priced listings (red and orange) tend to be located in the central areas and near tourist attractions, while more affordable options (green and blue) are often found in the surrounding neighborhoods. The demand map reveals areas with consistently high demand, which will be valuable for our predictive modeling.
 
 ## Neighborhood Analysis
 
-Let's analyze price variations by neighborhood.
+Let's analyze price and demand variations by neighborhood.
 
 ```{r neighborhood_analysis}
-# Check if neighborhood information is available
-if("neighbourhood" %in% names(train_data) || "neighborhood" %in% names(train_data)) {
-  # Determine which column to use
-  neighborhood_col <- ifelse("neighbourhood" %in% names(train_data), "neighbourhood", "neighborhood")
-  
-  # Count listings by neighborhood
-  neighborhood_counts <- train_data %>%
-    count(!!sym(neighborhood_col)) %>%
-    arrange(desc(n))
-  
-  # Top 15 neighborhoods by listing count
-  top_neighborhoods <- head(neighborhood_counts, 15)
-  kable(top_neighborhoods, caption = "Top 15 Neighborhoods by Number of Listings")
-  
-  # Visualize neighborhood distribution
-  ggplot(top_neighborhoods, aes(x = reorder(!!sym(neighborhood_col), n), y = n)) +
-    geom_bar(stat = "identity", fill = "steelblue") +
-    coord_flip() +
-    labs(title = "Top 15 Neighborhoods by Number of Listings",
-         x = "Neighborhood",
-         y = "Number of Listings") +
-    theme_minimal()
-  
-  # If price is available, analyze price by neighborhood
-  if("price" %in% names(train_data)) {
-    # Calculate average price by neighborhood
-    avg_price_by_neighborhood <- train_data %>%
-      group_by(!!sym(neighborhood_col)) %>%
-      summarise(
-        avg_price = mean(price, na.rm = TRUE),
-        median_price = median(price, na.rm = TRUE),
-        count = n()
-      ) %>%
-      filter(count >= 10) %>%  # Only include neighborhoods with at least 10 listings
-      arrange(desc(avg_price))
-    
-    # Top 15 neighborhoods by average price
-    top_price_neighborhoods <- head(avg_price_by_neighborhood, 15)
-    kable(top_price_neighborhoods, caption = "Top 15 Neighborhoods by Average Price")
-    
-    # Visualize average price by neighborhood
-    ggplot(top_price_neighborhoods, 
-           aes(x = reorder(!!sym(neighborhood_col), avg_price), y = avg_price)) +
-      geom_bar(stat = "identity", fill = "steelblue") +
-      geom_text(aes(label = round(avg_price, 0)), hjust = -0.1, size = 3) +
-      coord_flip() +
-      labs(title = "Top 15 Neighborhoods by Average Price",
-           x = "Neighborhood",
-           y = "Average Price (Euro)") +
-      theme_minimal()
-    
-    # Price distribution by neighborhood (box plots)
-    # Select top 10 neighborhoods by listing count for readability
-    top10_neighborhoods <- neighborhood_counts$neighbourhood[1:10]
-    
-    train_data %>%
-      filter(!!sym(neighborhood_col) %in% top10_neighborhoods) %>%
-      ggplot(aes(x = reorder(!!sym(neighborhood_col), price, FUN = median), y = price)) +
-      geom_boxplot(fill = "steelblue", alpha = 0.7) +
-      coord_flip() +
-      labs(title = "Price Distribution by Neighborhood",
-           x = "Neighborhood",
-           y = "Price (Euro)") +
-      theme_minimal()
-  }
-}
+# Count listings by neighborhood
+neighborhood_counts <- train_data %>%
+  count(neighbourhood) %>%
+  arrange(desc(n))
+
+# Top 15 neighborhoods by listing count
+top_neighborhoods <- head(neighborhood_counts, 15)
+kable(top_neighborhoods, caption = "Top 15 Neighborhoods by Number of Listings")
+
+# Visualize neighborhood distribution
+ggplot(top_neighborhoods, aes(x = reorder(neighbourhood, n), y = n)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  coord_flip() +
+  labs(title = "Top 15 Neighborhoods by Number of Listings",
+       x = "Neighborhood",
+       y = "Number of Listings") +
+  theme_minimal()
+
+# Calculate average price by neighborhood
+avg_price_by_neighborhood <- train_data %>%
+  group_by(neighbourhood) %>%
+  summarise(
+    avg_price = mean(price, na.rm = TRUE),
+    median_price = median(price, na.rm = TRUE),
+    count = n()
+  ) %>%
+  filter(count >= 10) %>%  # Only include neighborhoods with at least 10 listings
+  arrange(desc(avg_price))
+
+# Top 15 neighborhoods by average price
+top_price_neighborhoods <- head(avg_price_by_neighborhood, 15)
+kable(top_price_neighborhoods, caption = "Top 15 Neighborhoods by Average Price")
+
+# Visualize average price by neighborhood
+ggplot(top_price_neighborhoods, 
+       aes(x = reorder(neighbourhood, avg_price), y = avg_price)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  geom_text(aes(label = round(avg_price, 0)), hjust = -0.1, size = 3) +
+  coord_flip() +
+  labs(title = "Top 15 Neighborhoods by Average Price",
+       x = "Neighborhood",
+       y = "Average Price (Euro)") +
+  theme_minimal()
+
+# Calculate average demand by neighborhood
+avg_demand_by_neighborhood <- train_data %>%
+  group_by(neighbourhood) %>%
+  summarise(
+    avg_demand = mean(demand_proxy, na.rm = TRUE),
+    count = n()
+  ) %>%
+  filter(count >= 10) %>%  # Only include neighborhoods with at least 10 listings
+  arrange(desc(avg_demand))
+
+# Top 15 neighborhoods by average demand
+top_demand_neighborhoods <- head(avg_demand_by_neighborhood, 15)
+kable(top_demand_neighborhoods, caption = "Top 15 Neighborhoods by Average Demand")
+
+# Visualize average demand by neighborhood
+ggplot(top_demand_neighborhoods, 
+       aes(x = reorder(neighbourhood, avg_demand), y = avg_demand)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  coord_flip() +
+  labs(title = "Top 15 Neighborhoods by Average Demand",
+       x = "Neighborhood",
+       y = "Average Demand Proxy") +
+  theme_minimal()
+
+# Price distribution by neighborhood (box plots)
+# Select top 10 neighborhoods by listing count for readability
+top10_neighborhoods <- neighborhood_counts$neighbourhood[1:10]
+
+train_data %>%
+  filter(neighbourhood %in% top10_neighborhoods) %>%
+  ggplot(aes(x = reorder(neighbourhood, price, FUN = median), y = price)) +
+  geom_boxplot(fill = "steelblue", alpha = 0.7) +
+  coord_flip() +
+  labs(title = "Price Distribution by Neighborhood",
+       x = "Neighborhood",
+       y = "Price (Euro)") +
+  theme_minimal() +
+  ylim(0, 300)  # Limit to focus on main distribution, not outliers
 ```
+
+**Neighborhood Insights**: We can see significant variation in both price and demand across Berlin's neighborhoods. The most listings are found in Neukölln, Friedrichshain, and Prenzlauer Berg. The most expensive neighborhoods aren't necessarily the ones with the most listings, suggesting that price alone isn't the only factor in property supply. The data also reveals which neighborhoods have the highest average demand, information that will be valuable for hosts deciding where to invest in properties.
 
 ## Property and Room Type Analysis
 
-Let's analyze the property types and room types in our dataset.
-
 ```{r property_room_analysis}
-# Check if property_type exists
-if("property_type" %in% names(train_data)) {
-  # Distribution of property types
-  property_counts <- train_data %>%
-    count(property_type) %>%
-    arrange(desc(n))
-  
-  # Show top property types
-  kable(head(property_counts, 10), caption = "Top 10 Property Types")
-  
-  # Visualize property type distribution
-  ggplot(head(property_counts, 10), aes(x = reorder(property_type, n), y = n)) +
-    geom_bar(stat = "identity", fill = "steelblue") +
-    coord_flip() +
-    labs(title = "Top 10 Property Types",
-         x = "Property Type",
-         y = "Count") +
-    theme_minimal()
-}
+# Distribution of property types
+property_counts <- train_data %>%
+  count(property_type) %>%
+  arrange(desc(n))
 
-# Check if room_type exists
-if("room_type" %in% names(train_data)) {
-  # Distribution of room types
-  room_counts <- train_data %>%
-    count(room_type) %>%
-    arrange(desc(n))
-  
-  # Show room types
-  kable(room_counts, caption = "Distribution of Room Types")
-  
-  # Visualize room type distribution
-  ggplot(room_counts, aes(x = reorder(room_type, n), y = n)) +
-    geom_bar(stat = "identity", fill = "steelblue") +
-    coord_flip() +
-    labs(title = "Distribution of Room Types",
-         x = "Room Type",
-         y = "Count") +
-    theme_minimal()
-  
-  # If price is available, analyze average price by room type
-  if("price" %in% names(train_data)) {
-    avg_price_by_room <- train_data %>%
-      group_by(room_type) %>%
-      summarise(
-        avg_price = mean(price, na.rm = TRUE),
-        median_price = median(price, na.rm = TRUE),
-        count = n()
-      ) %>%
-      arrange(desc(avg_price))
-    
-    kable(avg_price_by_room, caption = "Average Price by Room Type")
-    
-    # Boxplot of price by room type
-    ggplot(train_data, aes(x = room_type, y = price)) +
-      geom_boxplot(fill = "steelblue", alpha = 0.7) +
-      labs(title = "Price Distribution by Room Type",
-           x = "Room Type",
-           y = "Price (Euro)") +
-      theme_minimal()
-  }
-}
+# Show top property types
+kable(head(property_counts, 10), caption = "Top 10 Property Types")
+
+# Visualize property type distribution
+ggplot(head(property_counts, 10), aes(x = reorder(property_type, n), y = n)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  coord_flip() +
+  labs(title = "Top 10 Property Types",
+       x = "Property Type",
+       y = "Count") +
+  theme_minimal()
+
+# Distribution of room types
+room_counts <- train_data %>%
+  count(room_type) %>%
+  arrange(desc(n))
+
+# Show room types
+kable(room_counts, caption = "Distribution of Room Types")
+
+# Visualize room type distribution
+ggplot(room_counts, aes(x = reorder(room_type, n), y = n)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  coord_flip() +
+  labs(title = "Distribution of Room Types",
+       x = "Room Type",
+       y = "Count") +
+  theme_minimal()
+
+# Analyze average price by room type
+avg_price_by_room <- train_data %>%
+  group_by(room_type) %>%
+  summarise(
+    avg_price = mean(price, na.rm = TRUE),
+    median_price = median(price, na.rm = TRUE),
+    count = n()
+  ) %>%
+  arrange(desc(avg_price))
+
+kable(avg_price_by_room, caption = "Average Price by Room Type")
+
+# Boxplot of price by room type
+ggplot(train_data, aes(x = room_type, y = price)) +
+  geom_boxplot(fill = "steelblue", alpha = 0.7) +
+  labs(title = "Price Distribution by Room Type",
+       x = "Room Type",
+       y = "Price (Euro)") +
+  theme_minimal() +
+  ylim(0, 300)  # Limit to focus on main distribution, not outliers
+
+# Relationship between demand proxy and room type
+ggplot(train_data, aes(x = room_type, y = demand_proxy)) +
+  geom_boxplot(fill = "steelblue", alpha = 0.7) +
+  labs(title = "Demand by Room Type",
+       x = "Room Type",
+       y = "Demand Proxy") +
+  theme_minimal()
 ```
 
-## Accommodation and Amenities Analysis
-
-Let's analyze how accommodation capacity and amenities relate to price.
-
-```{r accommodation_analysis}
-# Check if accommodates column exists
-if("accommodates" %in% names(train_data)) {
-  # Distribution of accommodation capacity
-  accom_counts <- train_data %>%
-    count(accommodates) %>%
-    arrange(accommodates)
-  
-  kable(accom_counts, caption = "Distribution of Accommodation Capacity")
-  
-  # Visualize accommodation distribution
-  ggplot(accom_counts, aes(x = as.factor(accommodates), y = n)) +
-    geom_bar(stat = "identity", fill = "steelblue") +
-    labs(title = "Distribution of Accommodation Capacity",
-         x = "Number of People Accommodated",
-         y = "Count") +
-    theme_minimal()
-  
-  # If price is available, analyze relationship between capacity and price
-  if("price" %in% names(train_data)) {
-    avg_price_by_accom <- train_data %>%
-      group_by(accommodates) %>%
-      summarise(
-        avg_price = mean(price, na.rm = TRUE),
-        median_price = median(price, na.rm = TRUE),
-        count = n()
-      ) %>%
-      arrange(accommodates)
-    
-    kable(avg_price_by_accom, caption = "Average Price by Accommodation Capacity")
-    
-    # Scatter plot with trend line
-    ggplot(train_data, aes(x = accommodates, y = price)) +
-      geom_point(alpha = 0.3, color = "steelblue") +
-      geom_smooth(method = "lm", color = "red") +
-      labs(title = "Relationship Between Accommodation Capacity and Price",
-           x = "Number of People Accommodated",
-           y = "Price (Euro)") +
-      theme_minimal()
-    
-    # Boxplot of price by accommodation capacity
-    ggplot(train_data, aes(x = as.factor(accommodates), y = price)) +
-      geom_boxplot(fill = "steelblue", alpha = 0.7) +
-      labs(title = "Price Distribution by Accommodation Capacity",
-           x = "Number of People Accommodated",
-           y = "Price (Euro)") +
-      theme_minimal()
-  }
-}
-
-# Check for bedrooms, beds, and bathrooms
-bed_bath_columns <- c("bedrooms", "beds", "bathrooms")
-existing_columns <- bed_bath_columns[bed_bath_columns %in% names(train_data)]
-
-if(length(existing_columns) > 0 && "price" %in% names(train_data)) {
-  # Create plots for each column
-  for(col in existing_columns) {
-    # Summary statistics
-    col_summary <- train_data %>%
-      group_by(!!sym(col)) %>%
-      summarise(
-        avg_price = mean(price, na.rm = TRUE),
-        median_price = median(price, na.rm = TRUE),
-        count = n()
-      ) %>%
-      arrange(!!sym(col))
-    
-    print(paste("Average price by", col))
-    print(kable(col_summary))
-    
-    # Plot
-    p <- ggplot(train_data, aes(x = as.factor(!!sym(col)), y = price)) +
-      geom_boxplot(fill = "steelblue", alpha = 0.7) +
-      labs(title = paste("Price Distribution by", tools::toTitleCase(col)),
-           x = tools::toTitleCase(col),
-           y = "Price (Euro)") +
-      theme_minimal()
-    
-    print(p)
-  }
-}
-```
+**Property and Room Type Insights**: Apartments are by far the most common property type in Berlin's Airbnb market, followed by condominiums and houses. The room type analysis shows that entire homes/apartments are the most common listing type, followed by private rooms. As expected, entire homes/apartments command higher prices than private rooms, which in turn are more expensive than shared rooms. The demand analysis reveals interesting patterns about which room types tend to have higher booking demand.
 
 ## Reviews and Ratings Analysis
 
-Let's analyze review counts and ratings to understand their relationship with property demand.
-
 ```{r reviews_analysis}
-# Check if reviews column exists
-if("reviews" %in% names(train_data)) {
-  # Summary of review counts
-  review_summary <- summary(train_data$reviews)
-  print(review_summary)
-  
-  # Distribution of review counts
-  ggplot(train_data, aes(x = reviews)) +
-    geom_histogram(bins = 30, fill = "steelblue", alpha = 0.7) +
-    labs(title = "Distribution of Review Counts",
-         x = "Number of Reviews",
-         y = "Count") +
-    theme_minimal()
-  
-  # Log-transformed distribution for skewed data
-  ggplot(train_data %>% filter(reviews > 0), aes(x = reviews)) +
-    geom_histogram(bins = 30, fill = "steelblue", alpha = 0.7) +
-    scale_x_log10() +
-    labs(title = "Distribution of Review Counts (Log Scale)",
-         x = "Number of Reviews (Log Scale)",
-         y = "Count") +
-    theme_minimal()
-}
+# Summary of review counts
+review_summary <- summary(train_data$reviews)
+print(review_summary)
 
-# Check for rating columns
-rating_columns <- names(train_data)[grepl("rating", names(train_data), ignore.case = TRUE)]
+# Distribution of review counts
+ggplot(train_data, aes(x = reviews)) +
+  geom_histogram(bins = 30, fill = "steelblue", alpha = 0.7) +
+  labs(title = "Distribution of Review Counts",
+       x = "Number of Reviews",
+       y = "Count") +
+  theme_minimal()
 
-if(length(rating_columns) > 0) {
-  # Distribution of ratings
-  for(col in rating_columns) {
-    # Summary statistics
-    rating_summary <- summary(train_data[[col]])
-    cat(paste("\nSummary of", col, ":\n"))
-    print(rating_summary)
-    
-    # Plot distribution
-    p <- ggplot(train_data, aes(x = !!sym(col))) +
-      geom_histogram(bins = 20, fill = "steelblue", alpha = 0.7) +
-      labs(title = paste("Distribution of", tools::toTitleCase(col)),
-           x = tools::toTitleCase(col),
-           y = "Count") +
-      theme_minimal()
-    
-    print(p)
-    
-    # If price is available, check correlation with ratings
-    if("price" %in% names(train_data)) {
-      # Scatter plot
-      p2 <- ggplot(train_data, aes(x = !!sym(col), y = price)) +
-        geom_point(alpha = 0.3, color = "steelblue") +
-        geom_smooth(method = "lm", color = "red") +
-        labs(title = paste("Relationship Between", tools::toTitleCase(col), "and Price"),
-             x = tools::toTitleCase(col),
-             y = "Price (Euro)") +
-        theme_minimal()
-      
-      print(p2)
-    }
-  }
-}
+# Log-transformed distribution for skewed data
+ggplot(train_data %>% filter(reviews > 0), aes(x = reviews)) +
+  geom_histogram(bins = 30, fill = "steelblue", alpha = 0.7) +
+  scale_x_log10() +
+  labs(title = "Distribution of Review Counts (Log Scale)",
+       x = "Number of Reviews (Log Scale)",
+       y = "Count") +
+  theme_minimal()
+
+# Distribution of overall rating
+ggplot(train_data, aes(x = overall_rating)) +
+  geom_histogram(bins = 20, fill = "steelblue", alpha = 0.7) +
+  labs(title = "Distribution of Overall Ratings",
+       x = "Overall Rating",
+       y = "Count") +
+  theme_minimal()
+
+# Check correlation between ratings and price
+rating_columns <- c("overall_rating", "accuracy_rating", "cleanliness_rating", 
+                   "checkin_rating", "communication_rating", "location_rating", 
+                   "value_rating")
+
+# Calculate correlations between ratings and price
+rating_price_cors <- sapply(rating_columns, function(col) {
+  cor(train_data[[col]], train_data$price, use = "pairwise.complete.obs")
+})
+
+# Display correlations
+kable(data.frame(
+  Rating = rating_columns,
+  Correlation_with_Price = rating_price_cors
+), caption = "Correlation between Ratings and Price")
+
+# Correlation with demand proxy
+rating_demand_cors <- sapply(rating_columns, function(col) {
+  cor(train_data[[col]], train_data$demand_proxy, use = "pairwise.complete.obs")
+})
+
+# Display correlations
+kable(data.frame(
+  Rating = rating_columns,
+  Correlation_with_Demand = rating_demand_cors
+), caption = "Correlation between Ratings and Demand Proxy")
 ```
+
+**Reviews and Ratings Insights**: The distribution of reviews is highly skewed, with many properties having few reviews and a small number having hundreds of reviews. This is why we've used review counts as a key component in our demand proxy calculation. The ratings show a general trend toward high scores, with most properties being rated above 90 out of 100. The correlation analysis reveals interesting relationships between ratings, price, and demand, which can inform both pricing strategies for hosts and our predictive modeling approach.
 
 ## Correlation Analysis
 
 Let's examine correlations between numeric variables to understand relationships.
 
 ```{r correlation_analysis}
-# Select numeric columns
+# Select numeric columns for correlation analysis
 numeric_columns <- train_data %>%
-  select_if(is.numeric) %>%
+  dplyr::select_if(is.numeric) %>%
   # Remove ID columns and other non-meaningful numeric columns
-  select(-matches("id|_id$|index|^X$"), -one_of("latitude", "longitude"))
+  dplyr::select(-contains("id"), -contains("listing"), -contains("host_id"))
 
-# If there are numeric columns, create correlation matrix
-if(ncol(numeric_columns) > 1) {
-  # Calculate correlation matrix
-  cor_matrix <- cor(numeric_columns, use = "pairwise.complete.obs")
-  
-  # Plot correlation matrix
-  corrplot(cor_matrix, method = "circle", type = "upper", 
-           tl.col = "black", tl.srt = 45, tl.cex = 0.7,
-           title = "Correlation Matrix of Numeric Variables")
-  
-  # Display top correlations with price (if available)
-  if("price" %in% names(numeric_columns)) {
-    price_cors <- cor_matrix["price", ]
-    price_cors <- price_cors[order(abs(price_cors), decreasing = TRUE)]
-    price_cors <- price_cors[price_cors != 1]  # Remove self-correlation
-    
-    cat("\nTop correlations with price:\n")
-    print(head(price_cors, 10))
-  }
-}
+# Select a subset of most relevant columns for correlation analysis
+key_columns <- c("price", "accommodates", "bathrooms", "bedrooms", "beds", 
+                "reviews", "overall_rating", "demand_proxy", 
+                "distance_to_center_km", "price_per_person", "host_experience_days")
+
+# Filter to only include columns that exist
+key_columns <- key_columns[key_columns %in% names(numeric_columns)]
+key_numeric <- numeric_columns[, key_columns]
+
+# Calculate correlation matrix
+cor_matrix <- cor(key_numeric, use = "pairwise.complete.obs")
+
+# Plot correlation matrix
+corrplot(cor_matrix, method = "circle", type = "upper", 
+         tl.col = "black", tl.srt = 45, tl.cex = 0.7,
+         title = "Correlation Matrix of Key Variables")
+
+# Display top correlations with price
+price_cors <- cor_matrix["price", ]
+price_cors <- price_cors[order(abs(price_cors), decreasing = TRUE)]
+
+cat("\nTop correlations with price:\n")
+print(price_cors)
+
+# Display top correlations with demand_proxy
+demand_cors <- cor_matrix["demand_proxy", ]
+demand_cors <- demand_cors[order(abs(demand_cors), decreasing = TRUE)]
+
+cat("\nTop correlations with demand_proxy:\n")
+print(demand_cors)
 ```
 
-# Creating a Demand Proxy
+**Correlation Insights**: The correlation analysis reveals important relationships between variables. Price is strongly correlated with the number of accommodates, bedrooms, and bathrooms, as expected. Interestingly, our demand proxy shows strong correlation with reviews (which makes sense as it's part of the calculation) but less so with price, suggesting that demand isn't solely driven by pricing. The distance to the city center shows a negative correlation with price, confirming that central locations command higher prices. These relationships will be valuable for our predictive modeling.
 
-Since our dataset may not have a direct demand measure, we need to create a proxy based on available data.
+## Key Insights Summary
 
-```{r demand_proxy}
-# Check which columns we have available for demand proxy creation
-potential_demand_columns <- c("reviews", "availability_365", "availability_90", "availability_30")
-available_columns <- potential_demand_columns[potential_demand_columns %in% names(train_data)]
+Based on our exploratory data analysis, we've identified several key insights:
 
-cat("Available columns for demand proxy creation:", paste(available_columns, collapse = ", "), "\n")
+1. **Demand Distribution**: The demand proxy shows a right-skewed distribution, with most properties having low to moderate demand and fewer properties having very high demand.
 
-# Create a simple demand proxy based on available data
-train_data_with_proxy <- train_data
+2. **Price Patterns**:
+   - Median price is around €49 per night
+   - Prices follow a right-skewed distribution
+   - Central neighborhoods have higher prices
+   - Entire homes/apartments command higher prices than private rooms
 
-# If review data is available
-if("reviews" %in% names(train_data)) {
-  # Normalize reviews (higher = more demand)
-  max_reviews <- max(train_data$reviews, na.rm = TRUE)
-  train_data_with_proxy$review_score <- train_data$reviews / max_reviews
-}
+3. **Geographic Patterns**:
+   - Listings are concentrated in central districts
+   - Both price and demand show clear spatial patterns
+   - Distance to city center is negatively correlated with price
 
-# If availability data is available (lower = more demand)
-availability_cols <- c("availability_365", "availability_90", "availability_30")
-available_avail_cols <- availability_cols[availability_cols %in% names(train_data)]
+4. **Neighborhood Insights**:
+   - Top neighborhoods by listing count: Neukölln, Friedrichshain, Prenzlauer Berg
+   - Top neighborhoods by price aren't necessarily the same as by count
+   - Certain neighborhoods show notably higher demand
 
-if(length(available_avail_cols) > 0) {
-  # Choose the shortest time period available for more recent data
-  avail_col <- available_avail_cols[length(available_avail_cols)]
-  max_avail <- as.numeric(gsub("availability_", "", avail_col))
-  
-  # Invert availability (1 - availability/max_days) so higher = more demand
-  train_data_with_proxy$availability_score <- 1 - (train_data[[avail_col]] / max_avail)
-}
+5. **Property Characteristics**:
+   - Apartments dominate the Berlin Airbnb market
+   - Number of accommodates, bedrooms, and bathrooms are key price drivers
+   - Room type significantly impacts both price and demand
 
-# Combine available proxies
-if(exists("review_score", where = train_data_with_proxy) && 
-   exists("availability_score", where = train_data_with_proxy)) {
-  # Combined demand score (average of review and availability scores)
-  train_data_with_proxy$demand_proxy <- (train_data_with_proxy$review_score + 
-                                        train_data_with_proxy$availability_score) / 2
-} else if(exists("review_score", where = train_data_with_proxy)) {
-  train_data_with_proxy$demand_proxy <- train_data_with_proxy$review_score
-} else if(exists("availability_score", where = train_data_with_proxy)) {
-  train_data_with_proxy$demand_proxy <- train_data_with_proxy$availability_score
-} else {
-  # If no good proxy is available, we'll need to use price as an indirect indicator
-  if("price" %in% names(train_data)) {
-    # Normalize price (assuming higher price = higher demand, which is simplistic)
-    max_price <- max(train_data$price, na.rm = TRUE)
-    train_data_with_proxy$demand_proxy <- train_data$price / max_price
-    cat("Using normalized price as a fallback demand proxy\n")
-  } else {
-    cat("No suitable demand proxy could be created from available data\n")
-  }
-}
+6. **Rating Patterns**:
+   - Most properties have high ratings (90+ out of 100)
+   - Ratings show some correlation with demand but less with price
 
-# Visualize the demand proxy if created
-if("demand_proxy" %in% names(train_data_with_proxy)) {
-  # Distribution of demand proxy
-  ggplot(train_data_with_proxy, aes(x = demand_proxy)) +
-    geom_histogram(bins = 30, fill = "steelblue", alpha = 0.7) +
-    labs(title = "Distribution of Demand Proxy",
-         x = "Demand Proxy (0-1 scale)",
-         y = "Count") +
-    theme_minimal()
-  
-  # If we have neighborhood data, show average demand by neighborhood
-  if("neighbourhood" %in% names(train_data) || "neighborhood" %in% names(train_data)) {
-    # Determine which column to use
-    neighborhood_col <- ifelse("neighbourhood" %in% names(train_data), "neighbourhood", "neighborhood")
-    
-    # Calculate average demand by neighborhood
-    avg_demand_by_neighborhood <- train_data_with_proxy %>%
-      group_by(!!sym(neighborhood_col)) %>%
-      summarise(
-        avg_demand = mean(demand_proxy, na.rm = TRUE),
-        count = n()
-      ) %>%
-      filter(count >= 10) %>%  # Only include neighborhoods with at least 10 listings
-      arrange(desc(avg_demand))
-    
-    # Top 15 neighborhoods by average demand
-    top_demand_neighborhoods <- head(avg_demand_by_neighborhood, 15)
-    kable(top_demand_neighborhoods, caption = "Top 15 Neighborhoods by Average Demand")
-    
-    # Visualize average demand by neighborhood
-    ggplot(top_demand_neighborhoods, 
-           aes(x = reorder(!!sym(neighborhood_col), avg_demand))) +
-      geom_bar(stat = "identity", fill = "steelblue") +
-      coord_flip() +
-      labs(title = "Top 15 Neighborhoods by Average Demand",
-           x = "Neighborhood",
-           y = "Average Demand Proxy") +
-      theme_minimal()
-  }
-}
-```
+These insights will guide our feature selection and modeling approach in the next phase of the project.

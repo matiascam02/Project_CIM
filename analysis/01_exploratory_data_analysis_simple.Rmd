@@ -1,0 +1,264 @@
+---
+title: "Berlin Airbnb Rental Demand Prediction - Exploratory Data Analysis"
+author: "Data Science Team"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: cosmo
+    highlight: tango
+    code_folding: show
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, 
+                     warning = FALSE, 
+                     message = FALSE,
+                     fig.width = 10, 
+                     fig.height = 6)
+
+# Load necessary libraries
+library(tidyverse)    # For data manipulation and visualization
+library(leaflet)      # For interactive maps
+library(knitr)        # For nice tables
+```
+
+# Introduction
+
+This document contains the exploratory data analysis (EDA) for the Airbnb Berlin rental demand prediction project. We're analyzing the preprocessed data that was prepared by the `01_data_preprocessing.R` script, which includes a clean and consistent set of features as well as our target variable `demand_proxy`.
+
+## Data Loading
+
+```{r load_data}
+# Set the file path to the processed data
+processed_data_path <- "../data/processed/"
+
+# Load the train and test datasets
+train_data <- read.csv(paste0(processed_data_path, "train_berlin_clean.csv"))
+test_data <- read.csv(paste0(processed_data_path, "test_berlin_clean.csv"))
+
+# Display basic information about the datasets
+cat("Train dataset dimensions:", dim(train_data)[1], "rows,", dim(train_data)[2], "columns\n")
+cat("Test dataset dimensions:", dim(test_data)[1], "rows,", dim(test_data)[2], "columns\n")
+
+# Verify the target variable is present
+cat("\nTarget variable (demand_proxy) statistics:\n")
+summary(train_data$demand_proxy)
+```
+
+## Data Structure
+
+```{r data_structure}
+# Check data types for key columns
+str(train_data[, c("listing_id", "neighbourhood", "property_type", "room_type", 
+                  "price", "reviews", "demand_proxy")])
+
+# Summary statistics for key numeric columns
+print(summary(train_data$price))
+print(summary(train_data$reviews))
+```
+
+# Analysis of Key Variables
+
+## Target Variable: Demand Proxy
+
+Our target variable `demand_proxy` was created during preprocessing as a composite measure based on review counts and normalized scores.
+
+```{r demand_proxy_analysis}
+# Distribution of demand proxy
+ggplot(train_data, aes(x = demand_proxy)) +
+  geom_histogram(bins = 30, fill = "steelblue", alpha = 0.7) +
+  labs(title = "Distribution of Demand Proxy",
+       x = "Demand Proxy (0-1 scale)",
+       y = "Count") +
+  theme_minimal()
+
+# Box plot of demand proxy values
+ggplot(train_data, aes(y = demand_proxy)) +
+  geom_boxplot(fill = "steelblue", alpha = 0.7) +
+  labs(title = "Boxplot of Demand Proxy Values",
+       y = "Demand Proxy (0-1 scale)") +
+  theme_minimal()
+
+# Relationship between demand proxy and price
+ggplot(train_data, aes(x = price, y = demand_proxy)) +
+  geom_point(alpha = 0.2, color = "steelblue") +
+  labs(title = "Relationship Between Price and Demand Proxy",
+       x = "Price (Euro)",
+       y = "Demand Proxy") +
+  theme_minimal()
+```
+
+## Price Distribution Analysis
+
+```{r price_analysis}
+# Price distribution
+ggplot(train_data, aes(x = price)) +
+  geom_histogram(bins = 50, fill = "steelblue", alpha = 0.7) +
+  labs(title = "Distribution of Airbnb Prices in Berlin",
+       x = "Price (Euro)",
+       y = "Count") +
+  theme_minimal()
+
+# Price boxplot
+ggplot(train_data, aes(y = price)) +
+  geom_boxplot(fill = "steelblue", alpha = 0.7) +
+  labs(title = "Boxplot of Airbnb Prices in Berlin",
+       y = "Price (Euro)") +
+  theme_minimal()
+```
+
+## Geographic Analysis
+
+```{r geographic_analysis}
+# Create a leaflet map
+leaflet_map <- leaflet(train_data) %>%
+  addTiles() %>%
+  addCircleMarkers(
+    lng = ~longitude,
+    lat = ~latitude,
+    radius = 2,
+    color = "blue",
+    fillOpacity = 0.5,
+    popup = ~paste("Price:", price, "<br>",
+                  "Room Type:", room_type)
+  ) %>%
+  addControl(html = "<b>Airbnb Listings in Berlin</b>", position = "topright")
+
+# Display the map
+leaflet_map
+
+# Create bins for price
+price_breaks <- c(0, 50, 100, 150, 200, Inf)
+price_labels <- c("< 50", "50-100", "100-150", "150-200", "> 200")
+train_data$price_bin <- cut(train_data$price, 
+                           breaks = price_breaks,
+                           labels = price_labels)
+
+# Color palette
+price_pal <- colorFactor(
+  palette = c("green", "blue", "purple", "orange", "red"),
+  domain = train_data$price_bin
+)
+
+# Create a leaflet map with price colors
+price_map <- leaflet(train_data) %>%
+  addTiles() %>%
+  addCircleMarkers(
+    lng = ~longitude,
+    lat = ~latitude,
+    radius = 2,
+    color = ~price_pal(price_bin),
+    fillOpacity = 0.7,
+    popup = ~paste("Price:", price, "<br>",
+                  "Room Type:", room_type)
+  ) %>%
+  addLegend("bottomright", 
+            pal = price_pal, 
+            values = ~price_bin,
+            title = "Price (Euro)",
+            opacity = 1)
+
+# Display the map
+price_map
+```
+
+## Neighborhood Analysis
+
+```{r neighborhood_analysis}
+# Count listings by neighborhood
+neighborhood_counts <- table(train_data$neighbourhood)
+neighborhood_counts <- sort(neighborhood_counts, decreasing = TRUE)
+top_neighborhoods <- head(neighborhood_counts, 15)
+
+# Plot top neighborhoods
+barplot(top_neighborhoods, 
+        horiz = TRUE, 
+        col = "steelblue",
+        main = "Top 15 Neighborhoods by Number of Listings",
+        xlab = "Number of Listings",
+        las = 1)
+
+# Average price by neighborhood
+neighborhood_prices <- aggregate(price ~ neighbourhood, data = train_data, FUN = mean)
+neighborhood_prices <- neighborhood_prices[order(-neighborhood_prices$price), ]
+top_price_neighborhoods <- head(neighborhood_prices, 15)
+
+# Plot top neighborhoods by price
+barplot(top_price_neighborhoods$price, 
+        names.arg = top_price_neighborhoods$neighbourhood,
+        horiz = TRUE,
+        col = "steelblue",
+        main = "Top 15 Neighborhoods by Average Price",
+        xlab = "Average Price (Euro)",
+        las = 1)
+```
+
+## Property and Room Type Analysis
+
+```{r property_room_analysis}
+# Distribution of room types
+room_counts <- table(train_data$room_type)
+room_counts <- sort(room_counts, decreasing = TRUE)
+
+# Plot room types
+barplot(room_counts, 
+        horiz = TRUE, 
+        col = "steelblue",
+        main = "Distribution of Room Types",
+        xlab = "Count",
+        las = 1)
+
+# Analyze average price by room type
+room_prices <- aggregate(price ~ room_type, data = train_data, FUN = mean)
+room_prices <- room_prices[order(-room_prices$price), ]
+
+# Plot price by room type
+barplot(room_prices$price, 
+        names.arg = room_prices$room_type,
+        col = "steelblue",
+        main = "Average Price by Room Type",
+        ylab = "Average Price (Euro)",
+        las = 1)
+
+# Boxplot of price by room type
+boxplot(price ~ room_type, data = train_data,
+        col = "steelblue",
+        main = "Price Distribution by Room Type",
+        ylab = "Price (Euro)",
+        xlab = "")
+
+# Boxplot of demand proxy by room type
+boxplot(demand_proxy ~ room_type, data = train_data,
+        col = "steelblue",
+        main = "Demand by Room Type",
+        ylab = "Demand Proxy",
+        xlab = "")
+```
+
+## Key Insights Summary
+
+Based on our exploratory data analysis, we've identified several key insights:
+
+1. **Demand Distribution**: The demand proxy shows a right-skewed distribution, with most properties having low to moderate demand and fewer properties having very high demand.
+
+2. **Price Patterns**:
+   - Median price is around €49 per night
+   - Prices follow a right-skewed distribution
+   - Central neighborhoods have higher prices
+   - Entire homes/apartments command higher prices than private rooms
+
+3. **Geographic Patterns**:
+   - Listings are concentrated in central districts
+   - Both price and demand show clear spatial patterns
+
+4. **Neighborhood Insights**:
+   - Top neighborhoods by listing count: Neukölln, Friedrichshain, Prenzlauer Berg
+   - Most expensive neighborhoods aren't necessarily the ones with the most listings
+
+5. **Property Characteristics**:
+   - Apartments dominate the Berlin Airbnb market
+   - Room type significantly impacts both price and demand
+
+These insights will guide our feature selection and modeling approach in the next phase of the project. 

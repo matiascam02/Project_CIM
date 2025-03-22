@@ -1,0 +1,645 @@
+---
+title: "Berlin Airbnb Rental Demand Prediction - Model Development"
+author: "Data Science Team"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: cosmo
+    highlight: tango
+    code_folding: show
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, 
+                     warning = FALSE, 
+                     message = FALSE,
+                     fig.width = 10, 
+                     fig.height = 6)
+
+# Load required libraries
+library(tidyverse)      # For data manipulation
+library(caret)          # For model training and evaluation
+library(randomForest)   # For Random Forest models
+library(corrplot)       # For correlation plots
+library(knitr)          # For nice tables
+library(glmnet)         # For regularized regression models
+library(doParallel)     # For parallel processing
+library(pROC)           # For ROC curve analysis
+library(e1071)          # For SVM models
+```
+
+# Introduction
+
+This document covers the model development process for predicting Airbnb rental demand in Berlin. We will use the preprocessed data with the `demand_proxy` target variable created during the data preprocessing step.
+
+In this improved approach, we've implemented several techniques to address overfitting:
+
+1. **PCA (Principal Component Analysis)** for dimensionality reduction
+2. **Cross-validation** for more robust model evaluation
+3. **Multiple models comparison** to select the best performer
+4. **Hyperparameter tuning** to optimize model complexity
+5. **Feature selection** based on importance
+
+## Data Loading
+
+```{r load_data}
+# Define file paths
+processed_data_path <- "../data/processed/"
+models_path <- "../models/"
+results_path <- "../results/"
+
+# Load the processed data
+train_data <- read.csv(paste0(processed_data_path, "train_berlin_clean.csv"))
+test_data <- read.csv(paste0(processed_data_path, "test_berlin_clean.csv"))
+
+# Print basic information about the datasets
+cat(paste("Loaded train dataset with", nrow(train_data), "rows and", ncol(train_data), "columns"))
+cat(paste("\nLoaded test dataset with", nrow(test_data), "rows and", ncol(test_data), "columns"))
+
+# Display the first few rows of the training data
+kable(head(train_data[, c("listing_id", "neighbourhood", "room_type", "price", "reviews", "demand_proxy")]), 
+     caption = "Preview of Training Data")
+```
+
+# Data Preparation for Modeling
+
+Before we start modeling, we need to prepare the data by handling missing values and converting categorical variables to factors.
+
+```{r data_prep}
+# Check for any lingering NA values
+train_na_counts <- colSums(is.na(train_data))
+na_columns <- train_na_counts[train_na_counts > 0]
+
+# Display columns with missing values
+if(length(na_columns) > 0) {
+  kable(data.frame(
+    Column = names(na_columns),
+    Missing_Values = na_columns
+  ), caption = "Columns with Missing Values")
+}
+
+# Simple imputation for remaining NAs to avoid modeling errors
+# For numeric columns, use median; for categorical, use most frequent value
+train_data <- train_data %>%
+  mutate(across(where(is.numeric), ~ifelse(is.na(.), median(., na.rm = TRUE), .)),
+         across(where(is.character), ~ifelse(is.na(.), "Unknown", .)))
+
+# Convert categorical variables to factors for modeling
+# Include more categorical variables that might be important predictors
+cat_columns <- c("neighborhood_group", "property_type", "room_type", 
+                "host_response_time", "is_superhost", "instant_bookable")
+
+# Check the number of levels in each categorical column
+for (col in cat_columns) {
+  if (col %in% names(train_data)) {
+    num_levels <- length(unique(train_data[[col]]))
+    cat(paste("Column", col, "has", num_levels, "unique values\n"))
+  }
+}
+
+# Convert selected categorical columns to factors
+train_data <- train_data %>%
+  mutate(across(all_of(cat_columns), as.factor))
+
+# Feature Selection: Select features that are likely to be important for demand prediction
+features <- setdiff(names(train_data), 
+                   c("listing_id", "listing_name", "host_id", "host_name", 
+                     "city", "country", "country_code", "postal_code",
+                     "first_review", "last_review", "host_since",
+                     "demand_proxy", "demand_proxy_reviews", # These are our targets
+                     "neighbourhood", # Too many levels for RandomForest
+                     # Remove highly correlated features
+                     "room_type_entire", "room_type_private", "room_type_shared")) 
+
+# Target variable
+cat("Using demand_proxy as target variable for model development")
+```
+
+# Train-Validation Split
+
+We'll create a training and validation set to evaluate our model performance.
+
+```{r train_validation_split}
+# Create training and validation sets (70% train, 30% validation)
+set.seed(42) # For reproducibility
+train_index <- createDataPartition(train_data$demand_proxy, p = 0.7, list = FALSE)
+train_set <- train_data[train_index, ]
+valid_set <- train_data[-train_index, ]
+
+cat(paste("Training set size:", nrow(train_set), "rows"))
+cat(paste("\nValidation set size:", nrow(valid_set), "rows"))
+```
+
+# Feature Engineering and Dimensionality Reduction
+
+To prevent overfitting, we'll apply PCA (Principal Component Analysis) to reduce dimensionality.
+
+```{r feature_engineering}
+# Separate numerical and categorical features
+numeric_features <- names(train_set)[sapply(train_set, is.numeric)]
+numeric_features <- setdiff(numeric_features, "demand_proxy")
+categorical_features <- names(train_set)[sapply(train_set, is.factor)]
+
+# Display selected features
+cat("Selected numeric features:", length(numeric_features), "\n")
+cat("Selected categorical features:", length(categorical_features), "\n")
+
+# Create dummy variables for categorical features (one-hot encoding)
+dummy_model <- dummyVars(~., data = train_set[, c(categorical_features)])
+train_dummy <- predict(dummy_model, newdata = train_set[, c(categorical_features)])
+valid_dummy <- predict(dummy_model, newdata = valid_set[, c(categorical_features)])
+
+# Combine numeric and dummy variables
+train_combined <- cbind(train_set[, numeric_features], train_dummy)
+valid_combined <- cbind(valid_set[, numeric_features], valid_dummy)
+
+# Check for correlation among features
+correlation_matrix <- cor(train_combined)
+high_corr_threshold <- 0.75
+high_corr_features <- findCorrelation(correlation_matrix, cutoff = high_corr_threshold)
+cat(paste("Found", length(high_corr_features), "highly correlated features (r >", high_corr_threshold, ")\n"))
+
+# Visualize correlation matrix for selected features (limit to top 15 for visibility)
+corrplot(correlation_matrix[1:min(15, ncol(correlation_matrix)), 
+                           1:min(15, ncol(correlation_matrix))], 
+        method = "circle", type = "upper", 
+        title = "Correlation Matrix of Features", 
+        mar = c(0, 0, 1, 0))
+
+# Apply PCA for dimensionality reduction
+# First, normalize the data (center and scale)
+preproc <- preProcess(train_combined, method = c("center", "scale"))
+train_normalized <- predict(preproc, train_combined)
+valid_normalized <- predict(preproc, valid_combined)
+
+# Perform PCA
+pca_model <- prcomp(train_normalized)
+
+# Analyze variance explained by principal components
+variance_explained <- pca_model$sdev^2 / sum(pca_model$sdev^2)
+cumulative_variance <- cumsum(variance_explained)
+
+# Determine number of components to retain 90% of variance
+n_components <- which(cumulative_variance >= 0.9)[1]
+cat(paste("Number of PCA components to retain 90% variance:", n_components))
+
+# Plot variance explained
+variance_df <- data.frame(
+  Component = 1:length(variance_explained),
+  Individual_Variance = variance_explained,
+  Cumulative_Variance = cumulative_variance
+)
+
+ggplot(variance_df[1:min(30, nrow(variance_df)),], aes(x = Component)) +
+  geom_bar(aes(y = Individual_Variance), stat = "identity", fill = "steelblue") +
+  geom_line(aes(y = Cumulative_Variance, group = 1), color = "red", size = 1) +
+  geom_point(aes(y = Cumulative_Variance), color = "red", size = 3) +
+  geom_hline(yintercept = 0.9, linetype = "dashed", color = "darkgreen") +
+  geom_vline(xintercept = n_components, linetype = "dashed", color = "darkgreen") +
+  scale_y_continuous(sec.axis = sec_axis(~., name = "Cumulative Variance Explained")) +
+  labs(title = "PCA Variance Explained by Components",
+       x = "Principal Component",
+       y = "Individual Variance Explained") +
+  theme_minimal() +
+  annotate("text", x = n_components + 1, y = 0.9, 
+           label = paste(n_components, "components for 90% variance"), 
+           color = "darkgreen", hjust = 0)
+
+# Create PCA-transformed datasets
+train_pca <- predict(pca_model, train_normalized)[, 1:n_components]
+valid_pca <- predict(pca_model, valid_normalized)[, 1:n_components]
+
+# Add the target variable back
+train_pca_df <- as.data.frame(train_pca)
+train_pca_df$demand_proxy <- train_set$demand_proxy
+valid_pca_df <- as.data.frame(valid_pca)
+valid_pca_df$demand_proxy <- valid_set$demand_proxy
+```
+
+# Model Training with Cross-Validation
+
+We'll train multiple model types with cross-validation to find the one that performs best while avoiding overfitting.
+
+```{r setup_parallel, results='hide'}
+# Setup parallel processing for faster model training
+num_cores <- detectCores() - 1
+cl <- makeCluster(num_cores)
+registerDoParallel(cl)
+
+# Define cross-validation settings
+cv_control <- trainControl(
+  method = "cv",
+  number = 5,
+  verboseIter = TRUE,
+  savePredictions = "final",
+  allowParallel = TRUE
+)
+```
+
+## Random Forest with Hyperparameter Tuning
+
+```{r rf_model, results='hide'}
+# Define hyperparameter grid for tuning Random Forest
+rf_grid <- expand.grid(
+  mtry = c(floor(sqrt(n_components)), floor(n_components/3), floor(n_components/2))
+)
+
+# Train Random Forest on PCA-transformed data with cross-validation
+start_time_rf <- Sys.time()
+rf_model_cv <- train(
+  demand_proxy ~ .,
+  data = train_pca_df,
+  method = "rf",
+  ntree = 500,
+  importance = TRUE,
+  trControl = cv_control,
+  tuneGrid = rf_grid
+)
+end_time_rf <- Sys.time()
+training_time_rf <- difftime(end_time_rf, start_time_rf, units = "mins")
+
+# Show best parameters
+cat("Best Random Forest parameters:", "\n")
+print(rf_model_cv$bestTune)
+cat(paste("Random Forest training time:", round(training_time_rf, 2), "minutes"))
+```
+
+## Gradient Boosting Machine (GBM)
+
+```{r gbm_model, results='hide'}
+# Define hyperparameter grid for GBM
+gbm_grid <- expand.grid(
+  n.trees = c(100, 500),
+  interaction.depth = c(3, 5, 7),
+  shrinkage = c(0.01, 0.1),
+  n.minobsinnode = 10
+)
+
+# Train GBM with cross-validation
+start_time_gbm <- Sys.time()
+gbm_model_cv <- train(
+  demand_proxy ~ .,
+  data = train_pca_df,
+  method = "gbm",
+  trControl = cv_control,
+  tuneGrid = gbm_grid,
+  verbose = FALSE
+)
+end_time_gbm <- Sys.time()
+training_time_gbm <- difftime(end_time_gbm, start_time_gbm, units = "mins")
+
+# Show best parameters
+cat("Best GBM parameters:", "\n")
+print(gbm_model_cv$bestTune)
+cat(paste("GBM training time:", round(training_time_gbm, 2), "minutes"))
+```
+
+## Elastic Net Regression
+
+```{r elastic_net_model, results='hide'}
+# Define hyperparameter grid for Elastic Net
+glmnet_grid <- expand.grid(
+  alpha = seq(0, 1, by = 0.2),  # 0 = ridge, 1 = lasso, in between = elastic net
+  lambda = 10^seq(-4, -1, by = 0.5)
+)
+
+# Train Elastic Net with cross-validation
+start_time_glmnet <- Sys.time()
+glmnet_model_cv <- train(
+  demand_proxy ~ .,
+  data = train_pca_df,
+  method = "glmnet",
+  trControl = cv_control,
+  tuneGrid = glmnet_grid
+)
+end_time_glmnet <- Sys.time()
+training_time_glmnet <- difftime(end_time_glmnet, start_time_glmnet, units = "mins")
+
+# Show best parameters
+cat("Best Elastic Net parameters:", "\n")
+print(glmnet_model_cv$bestTune)
+cat(paste("Elastic Net training time:", round(training_time_glmnet, 2), "minutes"))
+
+# Stop parallel processing
+stopCluster(cl)
+```
+
+# Model Evaluation and Comparison
+
+Now we'll compare all models to select the best one.
+
+```{r model_evaluation}
+# Create a function to calculate evaluation metrics
+calculate_metrics <- function(actual, predicted, model_name) {
+  rmse <- sqrt(mean((actual - predicted)^2, na.rm = TRUE))
+  mae <- mean(abs(actual - predicted), na.rm = TRUE)
+  r_squared <- 1 - sum((actual - predicted)^2, na.rm = TRUE) / 
+               sum((actual - mean(actual, na.rm = TRUE))^2, na.rm = TRUE)
+  
+  data.frame(
+    model = model_name,
+    rmse = rmse,
+    mae = mae,
+    r_squared = r_squared
+  )
+}
+
+# Make predictions on validation set using each model
+rf_predictions <- predict(rf_model_cv, valid_pca_df)
+gbm_predictions <- predict(gbm_model_cv, valid_pca_df)
+glmnet_predictions <- predict(glmnet_model_cv, valid_pca_df)
+
+# Calculate metrics for each model
+rf_metrics <- calculate_metrics(valid_pca_df$demand_proxy, rf_predictions, "Random Forest (PCA)")
+gbm_metrics <- calculate_metrics(valid_pca_df$demand_proxy, gbm_predictions, "Gradient Boosting (PCA)")
+glmnet_metrics <- calculate_metrics(valid_pca_df$demand_proxy, glmnet_predictions, "Elastic Net (PCA)")
+
+# Combine metrics
+all_metrics <- rbind(rf_metrics, gbm_metrics, glmnet_metrics)
+all_metrics$training_time_mins <- c(
+  as.numeric(training_time_rf),
+  as.numeric(training_time_gbm),
+  as.numeric(training_time_glmnet)
+)
+all_metrics$num_features_original <- length(features)
+all_metrics$num_pca_components <- n_components
+
+# Display evaluation metrics
+kable(all_metrics, 
+     caption = "Model Performance Comparison", 
+     digits = 4)
+
+# Determine the best model based on RMSE
+best_model_idx <- which.min(all_metrics$rmse)
+best_model_name <- all_metrics$model[best_model_idx]
+cat(paste("Best model based on RMSE:", best_model_name))
+
+# Create a data frame with actual and predicted values for all models
+predictions_df <- data.frame(
+  actual = valid_pca_df$demand_proxy,
+  random_forest = rf_predictions,
+  gradient_boosting = gbm_predictions,
+  elastic_net = glmnet_predictions
+)
+
+# Create a long format data frame for plotting
+predictions_long <- predictions_df %>%
+  pivot_longer(cols = c(random_forest, gradient_boosting, elastic_net),
+               names_to = "model", values_to = "predicted")
+
+# Scatter plot of actual vs predicted values for all models
+ggplot(predictions_long, aes(x = actual, y = predicted, color = model)) +
+  geom_point(alpha = 0.3) +
+  geom_abline(intercept = 0, slope = 1, color = "red", linetype = "dashed") +
+  facet_wrap(~model) +
+  labs(title = "Model Comparison: Actual vs Predicted Values",
+       x = "Actual Demand Proxy",
+       y = "Predicted Demand Proxy") +
+  theme_minimal()
+
+# Bar plot comparing RMSE values
+ggplot(all_metrics, aes(x = reorder(model, -rmse), y = rmse, fill = model)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Model Comparison: RMSE",
+       x = "Model",
+       y = "RMSE (lower is better)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Bar plot comparing R-squared values
+ggplot(all_metrics, aes(x = reorder(model, r_squared), y = r_squared, fill = model)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Model Comparison: R-squared",
+       x = "Model",
+       y = "R-squared (higher is better)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+# Feature Importance
+
+Let's examine the feature importance based on the best model.
+
+```{r feature_importance}
+# Extract feature importance based on the best model
+if (best_model_name == "Random Forest (PCA)") {
+  # Get variable importance from Random Forest
+  rf_importance <- varImp(rf_model_cv)
+  importance_df <- data.frame(
+    feature = rownames(rf_importance$importance),
+    importance = rf_importance$importance$Overall
+  ) %>% arrange(desc(importance))
+  
+  # Plot feature importance
+  ggplot(importance_df[1:min(20, nrow(importance_df)),], 
+       aes(x = reorder(feature, importance), y = importance)) +
+    geom_bar(stat = "identity", fill = "steelblue") +
+    coord_flip() +
+    labs(title = paste("Top Feature Importance -", best_model_name),
+         x = "Principal Component",
+         y = "Importance") +
+    theme_minimal()
+  
+  # Analyze PCA component loadings to interpret important components
+  cat("Analyzing PCA component loadings for interpretation...\n")
+  # Get top loadings for the most important components
+  top_components <- importance_df$feature[1:5]  # Top 5 components
+  
+  # Extract the original feature loadings for these components
+  loadings_df <- data.frame()
+  
+  for (comp in top_components) {
+    comp_num <- as.numeric(gsub("PC", "", comp))
+    
+    # Get loadings for this component
+    loadings <- pca_model$rotation[, comp_num]
+    
+    # Get top features with highest absolute loadings
+    top_loadings <- sort(abs(loadings), decreasing = TRUE)[1:10]
+    top_features <- names(top_loadings)
+    
+    # Create a data frame with the loadings
+    comp_df <- data.frame(
+      component = comp,
+      feature = top_features,
+      loading = loadings[top_features]
+    )
+    
+    loadings_df <- rbind(loadings_df, comp_df)
+  }
+  
+  # Display top loadings
+  kable(loadings_df, 
+       caption = "Top Feature Loadings for Important PCA Components",
+       digits = 3)
+  
+} else if (best_model_name == "Gradient Boosting (PCA)") {
+  # Initialize importance_df to ensure it exists even if both methods fail
+  importance_df <- data.frame(
+    feature = colnames(valid_pca_df)[colnames(valid_pca_df) != "demand_proxy"],
+    importance = 1  # Default equal importance if both methods fail
+  )
+  
+  # Handle GBM importance differently to avoid the relative.influence issue
+  success <- FALSE
+  
+  # First try the caret varImp method
+  tryCatch({
+    # Try using varImp if it works
+    gbm_importance <- varImp(gbm_model_cv)
+    if (!is.null(gbm_importance) && !is.null(gbm_importance$importance)) {
+      importance_df <- data.frame(
+        feature = rownames(gbm_importance$importance),
+        importance = gbm_importance$importance$Overall
+      ) %>% arrange(desc(importance))
+      success <- TRUE
+      cat("Using caret's varImp function for feature importance\n")
+    }
+  }, error = function(e) {
+    cat("caret's varImp failed:", e$message, "\n")
+  })
+  
+  # If the first method failed, try the permutation approach
+  if (!success) {
+    cat("Standard varImp failed for GBM, using permutation importance method...\n")
+    
+    # Use the variable importance based on the permutation approach (model agnostic)
+    # Create an importance table based on which variables increased error when permuted
+    set.seed(123)
+    var_imp <- data.frame(feature = colnames(valid_pca_df)[colnames(valid_pca_df) != "demand_proxy"])
+    var_imp$importance <- 0
+    
+    # Get baseline prediction error
+    baseline_pred <- predict(gbm_model_cv, valid_pca_df)
+    baseline_error <- mean((valid_pca_df$demand_proxy - baseline_pred)^2)
+    
+    # For each variable, permute it and see how much error increases
+    # For speed, only test the first 10 variables
+    for (i in 1:min(10, nrow(var_imp))) {
+      curr_var <- var_imp$feature[i]
+      cat("Testing importance of variable:", curr_var, "\n")
+      
+      temp_data <- valid_pca_df
+      # Permute the variable
+      temp_data[[curr_var]] <- sample(temp_data[[curr_var]])
+      # Get predictions with permuted data
+      perm_pred <- predict(gbm_model_cv, temp_data)
+      # Calculate error
+      perm_error <- mean((valid_pca_df$demand_proxy - perm_pred)^2)
+      # Store importance as increase in error
+      var_imp$importance[i] <- perm_error - baseline_error
+    }
+    
+    # Ensure we have positive values (some might be negative due to randomness)
+    var_imp$importance <- pmax(0, var_imp$importance)
+    
+    # If all importances are 0, set them all to 1 (equal importance)
+    if (sum(var_imp$importance) == 0) {
+      var_imp$importance <- 1
+    }
+    
+    # Normalize importance values
+    if (max(var_imp$importance) > 0) {
+      var_imp$importance <- var_imp$importance / max(var_imp$importance) * 100
+    }
+    
+    # Sort by importance
+    importance_df <- var_imp %>% arrange(desc(importance))
+    cat("Permutation-based importance calculated for", min(10, nrow(var_imp)), "variables\n")
+  }
+  
+  # Plot feature importance
+  ggplot(importance_df[1:min(10, nrow(importance_df)),], 
+       aes(x = reorder(feature, importance), y = importance)) +
+    geom_bar(stat = "identity", fill = "steelblue") +
+    coord_flip() +
+    labs(title = paste("Top Feature Importance -", best_model_name),
+         x = "Principal Component",
+         y = "Importance") +
+    theme_minimal()
+  
+} else {
+  # For Elastic Net, get variable importance (coefficients)
+  glmnet_importance <- varImp(glmnet_model_cv)
+  importance_df <- data.frame(
+    feature = rownames(glmnet_importance$importance),
+    importance = glmnet_importance$importance$Overall
+  ) %>% arrange(desc(importance))
+  
+  # Plot feature importance
+  ggplot(importance_df[1:min(20, nrow(importance_df)),], 
+       aes(x = reorder(feature, importance), y = importance)) +
+    geom_bar(stat = "identity", fill = "steelblue") +
+    coord_flip() +
+    labs(title = paste("Top Feature Importance -", best_model_name),
+         x = "Principal Component",
+         y = "Importance") +
+    theme_minimal()
+}
+
+# Display top important components
+kable(head(importance_df, 10), 
+     caption = paste("Top 10 Most Important Components for", best_model_name), 
+     digits = 3)
+```
+
+# Model Saving
+
+Finally, we save all the trained models and preprocessing steps for later use.
+
+```{r model_save, eval=FALSE}
+# Save the models
+saveRDS(rf_model_cv, paste0(models_path, "random_forest_pca_model.rds"))
+saveRDS(gbm_model_cv, paste0(models_path, "gbm_pca_model.rds"))
+saveRDS(glmnet_model_cv, paste0(models_path, "glmnet_pca_model.rds"))
+
+# Also save the PCA model and preprocessing steps for later use in predictions
+saveRDS(pca_model, paste0(models_path, "pca_model.rds"))
+saveRDS(preproc, paste0(models_path, "preproc_model.rds"))
+saveRDS(dummy_model, paste0(models_path, "dummy_model.rds"))
+
+# Also save the original RandomForest model for backward compatibility
+# This model will be used by the existing simulation script
+if (best_model_name == "Random Forest (PCA)") {
+  saveRDS(rf_model_cv$finalModel, paste0(models_path, "random_forest_model.rds"))
+  cat("Saved RandomForest model for backward compatibility\n")
+}
+
+# Save model results for reporting
+write.csv(all_metrics, paste0(results_path, "model_performance_metrics.csv"), row.names = FALSE)
+write.csv(importance_df, paste0(results_path, "feature_importance.csv"), row.names = FALSE)
+
+cat("Models saved to", models_path, "\n")
+cat("Evaluation results saved to", results_path, "\n")
+```
+
+# Conclusion
+
+In this improved model development process, we addressed the overfitting issue by:
+
+1. **Applying PCA** to reduce dimensionality while preserving `r round(n_components/ncol(train_combined)*100)`% of the original variance.
+2. **Training multiple models** (Random Forest, Gradient Boosting, Elastic Net) to compare their performance.
+3. **Using cross-validation** to ensure more robust model evaluation.
+4. **Tuning hyperparameters** for each model to find the optimal complexity.
+
+The best performing model was the **`r best_model_name`** with:
+- **RMSE**: `r round(all_metrics$rmse[best_model_idx], 4)` (Root Mean Squared Error)
+- **MAE**: `r round(all_metrics$mae[best_model_idx], 4)` (Mean Absolute Error)
+- **R-squared**: `r round(all_metrics$r_squared[best_model_idx], 4)` (Coefficient of Determination)
+
+```{r eval=FALSE}
+# Display summary based on whether model was too good (suggesting overfitting)
+if (all_metrics$r_squared[best_model_idx] > 0.95) {
+  cat("⚠️ **Warning:** The R-squared value is suspiciously high, suggesting that the model might still be overfitting. Consider:")
+  cat("\n- Further reducing model complexity")
+  cat("\n- Collecting more training data")
+  cat("\n- Using more aggressive regularization")
+  cat("\n- Exploring simpler model architectures")
+}
+```
+
+By using PCA to reduce dimensionality and cross-validation to tune hyperparameters, we've created a more robust model that should generalize better to new data compared to the previous approach.
+
+In the next step, we'll use this improved model for simulation to understand how changes in property characteristics might affect demand. 

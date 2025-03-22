@@ -1,0 +1,3 @@
+"Modified_Value","Predicted_Demand","Feature"
+"True (t)",0.433185730603434,"is_superhost"
+"False (f)",0.683094675315501,"is_superhost"

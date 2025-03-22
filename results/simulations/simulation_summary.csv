@@ -1,6 +1,0 @@
-"simulation","key_finding","details"
-"Location Impact","Location has a significant impact on demand","Variation in demand across neighborhoods shows the importance of location in rental attraction."
-"Price Impact","Price has an optimal point for maximizing demand","The demand-price curve shows an optimal point beyond which higher prices decrease demand."
-"Property Type & Room Type","Property and room type combinations affect demand differently","Room type has a stronger impact on demand than property type, with entire homes being most desirable."
-"Host Experience","Host experience and superhost status impact demand","Both experience and superhost status positively impact demand, with an interactive effect."
-"Price Optimization by Location","Different neighborhoods have different optimal price points","Different neighborhoods have different optimal price points that maximize demand."
